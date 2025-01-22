@@ -1,3 +1,4 @@
+# 创建证书 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 365 -nodes
 import sys,os
 import importlib.util
 from typing import Sequence, Mapping, Any, Union
@@ -100,6 +101,7 @@ sft_spk_list = ['中文女', '中文男', '日语男', '粤语女', '英文女',
 stream_mode_list = [('否', False), ('是', True)]
 FAMILY_NAMES = ['cosyvoice', 'echoMimic']
 pose_path_list = NODE_CLASS_MAPPINGS["Echo_Sampler"]().INPUT_TYPES()['required']['pose_dir'][0]
+echomimic_infer_mode = NODE_CLASS_MAPPINGS["Echo_LoadModel"]().INPUT_TYPES()['required']['infer_mode'][0]
 
 
 cosyvoicenode = NODE_CLASS_MAPPINGS["CosyVoiceNode"]()
@@ -137,20 +139,22 @@ def generate_audio(tts_text, tts_mode, sft_dropdown, prompt_text, prompt_wav_upl
         return gr.update(value=res)  # use all the path way
 
 
-def generate_echo_video(image_input, audio_input, pose_input, width, height, length, steps, cfg, fps, context_frames, context_overlap, seed):
+def generate_echo_video(image_input, audio_input, pose_input, infer_mode,  width, height, length, steps, cfg, fps, context_frames, context_overlap, seed):
         if image_input is None or audio_input is None:
             return gr.update(value=None)
         echo_loadmodel = NODE_CLASS_MAPPINGS["Echo_LoadModel"]()
-        echo_loadmodel_1 = echo_loadmodel.main_loader(
-            vae="stabilityai/sd-vae-ft-mse",denoising=True,infer_mode="pose_normal_dwpose",
+        echo_loadmodel_1 = echo_loadmodel.main_loader(  # echo_loadmodel_1[0]['pipe'] TODO ,每次重新启动一个模式
+            vae="stabilityai/sd-vae-ft-mse",denoising=True,infer_mode=infer_mode, # pose_normal_dwpose
             draw_mouse=False,motion_sync=False,lowvram=False,version="V2",
         )
 
         loadimage = NODE_CLASS_MAPPINGS["LoadImage"]()
-        loadimage_3 = loadimage.load_image(image="11f297aed83799aaa6e54aede4570292.jpg")
+        # loadimage_3 = loadimage.load_image(image="11f297aed83799aaa6e54aede4570292.jpg")
+        loadimage_3 = loadimage.load_image(image=image_input)
 
         loadaudio = NODE_CLASS_MAPPINGS["LoadAudio"]()
-        loadaudio_4 = loadaudio.load(audio="ultraman.wav")
+        # loadaudio_4 = loadaudio.load(audio="ultraman.wav")
+        loadaudio_4 = loadaudio.load(audio=audio_input)
 
         vhs_loadvideo = NODE_CLASS_MAPPINGS["VHS_LoadVideo"]()
         vhs_loadvideo_11 = None
@@ -160,20 +164,21 @@ def generate_echo_video(image_input, audio_input, pose_input, width, height, len
         #     custom_width=512,custom_height=512,frame_load_cap=60,
         #     skip_first_frames=0,select_every_nth=1,unique_id=6076199186146585561,
         # )
-
         vhs_videoinfo = NODE_CLASS_MAPPINGS["VHS_VideoInfo"]()
+        # vhs_videoinfo_12 = vhs_videoinfo.get_video_info(    # (30.0, 450, 15.0, 832, 1152, 30.0, 60, 2.0, 832, 1152)
+        #     video_info=get_value_at_index(vhs_loadvideo_11, 3)
+        # )
+
         echo_sampler = NODE_CLASS_MAPPINGS["Echo_Sampler"]()
         vhs_videocombine = NODE_CLASS_MAPPINGS["VHS_VideoCombine"]()
 
         for q in range(1):
-            vhs_videoinfo_12 = vhs_videoinfo.get_video_info(    # (30.0, 450, 15.0, 832, 1152, 30.0, 60, 2.0, 832, 1152)
-                video_info=get_value_at_index(vhs_loadvideo_11, 3)
-            )
+            
             echo_sampler_13 = echo_sampler.em_main(
                 pose_dir=pose_input,    #  pose_input 'assets/halfbody_demo/pose/fight'
                 seed=random.randint(1, 2**32),
                 cfg=2.5, steps=steps, 
-                fps=get_value_at_index(vhs_videoinfo_12, 0),
+                fps=fps,  # get_value_at_index(vhs_videoinfo_12, 0),  get fps from video
                 sample_rate=16000,
                 facemask_ratio=0.1,
                 facecrop_ratio=0.8,
@@ -184,7 +189,7 @@ def generate_echo_video(image_input, audio_input, pose_input, width, height, len
                 model=get_value_at_index(echo_loadmodel_1, 0),
                 face_detector=get_value_at_index(echo_loadmodel_1, 1),
                 visualizer=get_value_at_index(echo_loadmodel_1, 2),
-                video_images=get_value_at_index(vhs_loadvideo_11, 0),
+                video_images=get_value_at_index(vhs_loadvideo_11, 0) if vhs_loadvideo_11 is not None else None,
             )
 
             vhs_videocombine_17 = vhs_videocombine.combine_video(
@@ -222,12 +227,14 @@ class EchoUI:
                 with gr.Column(scale=4, variant='panel'):
                     with gr.Group():
                         image_input = gr.Image(label="image", type="filepath", min_width=512)
-                        with gr.Row():
-                            audio_input = gr.Audio(label="audio", sources=["upload", "microphone"], type="filepath")
+                        # with gr.Row():
+                            # audio_input = gr.Audio(label="input audio", autoplay=False, streaming=True, type="filepath")
+                        audio_input = gr.Audio(label="input audio", sources=['upload', 'microphone'], type='filepath', scale=1)
                         with gr.Row():
                             pose_input = gr.Dropdown(label="姿态输入（目录地址）", value=pose_path_list[0], choices=pose_path_list)
-                    with gr.Row():
-                        generate_button = gr.Button("🎬 Echo_Run Video")
+                            infer_mode = gr.Dropdown(label="驱动模式", value='audio_drived_acc', choices=echomimic_infer_mode)
+                    # with gr.Row():
+                    generate_button = gr.Button("🎬 Echo_Run Video")
                     with gr.Row():
                         width = gr.Number(label="width", value=768)
                         height = gr.Number(label="height", value=768)
@@ -255,9 +262,14 @@ class EchoUI:
             #     inputs=[image_input, audio_input],  
             #     label="预设人物及音频",
             # )
+        infer_mode.change(
+            fn=lambda x: gr.update(value=6 if 'acc' in x else 20),
+            inputs=[infer_mode],
+            outputs=[steps],
+        )
         generate_button.click(
             generate_echo_video,
-            inputs=[image_input, audio_input, pose_input, width, height, length, steps, cfg, fps, context_frames, context_overlap, seed],
+            inputs=[image_input, audio_input, pose_input, infer_mode, width, height, length, steps, cfg, fps, context_frames, context_overlap, seed],
             outputs=[video_output],
         )
 
@@ -325,7 +337,7 @@ class WebUI:   # 总的层级
                     seed, speed],
             outputs=[audio_output])
 
-demo = WebUI(args=None).launch(server_name='0.0.0.0', server_port=5002)
+demo = WebUI(args=None).launch(server_name='0.0.0.0', server_port=5002) #, ssl_certfile="./cert.pem", ssl_keyfile="./key.pem", ssl_verify=False)
 
 if __name__ == "__main__1":
 
