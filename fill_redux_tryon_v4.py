@@ -3,6 +3,25 @@ import random
 import sys
 from typing import Sequence, Mapping, Any, Union
 import torch
+import time
+import numpy as np
+import tqdm
+from PIL import Image, ImageDraw, ImageFont
+from diffusers.utils import make_image_grid
+
+def pil2tensor(image):
+    new_image = image.convert('RGB')
+    img_array = np.array(new_image).astype(np.float32) / 255.0
+    img_tensor = torch.from_numpy(img_array)[None]
+    return img_tensor
+def tensor2pil(image):
+    return Image.fromarray((image[0].cpu().numpy() * 255).astype(np.uint8))
+
+def pilmask2tensor(mask_img):
+    mask_tensor = torch.from_numpy(np.array(mask_img.convert('L'))).float()  # 转换为float类型
+    mask_tensor = mask_tensor / 255.0  # 归一化到 0-1 范围
+    mask_tensor = mask_tensor.unsqueeze(0)
+    return mask_tensor
 
 
 def get_value_at_index(obj: Union[Sequence, Mapping], index: int) -> Any:
@@ -115,6 +134,54 @@ def import_custom_nodes() -> None:
 from nodes import NODE_CLASS_MAPPINGS
 
 
+import glob
+from itertools import product
+base_dir = '/home/dell/study/test_comfy/'
+save_dir = '/home/dell/study/test_comfy/img/'
+record_log = '/home/dell/study/test_comfy/1tryon_v4_1_a6000.txt'
+
+lego_version = 'tryon_v4'
+
+cloth_ = base_dir + 'clothe/*.jpg'
+human_ = base_dir + 'motel/'
+clothes = glob.glob(cloth_)
+humans = glob.glob(human_ + '*')
+humans = [i for i in humans  if 'mask' not in i]
+human_dc = {int(i.split('/')[-1].split('.')[0]) : i for i in humans }
+human_dc = {k:v for k,v in human_dc.items() if k < 8}
+
+human_masks = [i for i in glob.glob(human_ + '*')  if 'mask' in i]
+human_mask_dc = {int(i.split('/')[-1].split('_mask.')[0]) : i for i in human_masks }
+
+human_clothe_pairs = [
+    {
+        'human_id': human_id,
+        'human_path': human_path,
+        'human_mask_path': human_mask_dc[human_id],
+        'cloth_path': cloth_path
+    }
+    for human_id, human_path in human_dc.items()
+    for cloth_path in clothes
+]
+
+def draw_text(image, text, position=(50, 50), font_size=45, color=(255, 255, 255)):  # 默认白色
+    draw = ImageDraw.Draw(image)
+    # 根据图像模式选择适当的颜色格式
+    if image.mode == 'RGB':
+        color = (255, 255, 255) if color == 255 else color  # RGB模式
+    elif image.mode == 'RGBA':
+        color = (255, 255, 255, 255) if color == 255 else color  # RGBA模式
+    elif image.mode in ['L', '1']:
+        color = 255 if isinstance(color, tuple) else color  # 灰度图模式
+    
+    font = ImageFont.load_default(size=font_size)
+    
+    # 绘制文本
+    draw.text(position, text, font=font, fill=color)
+    
+    return image
+
+
 def main():
     import_custom_nodes()
     # model loade ------
@@ -208,285 +275,303 @@ def main():
     image_comparer_rgthree = NODE_CLASS_MAPPINGS["Image Comparer (rgthree)"]()
     saveimage = NODE_CLASS_MAPPINGS["SaveImage"]()
 
-    with torch.inference_mode():
+    bar = tqdm.tqdm(len(human_clothe_pairs))
+    with torch.inference_mode() , open(record_log, 'w') as ref:
 
-        loadimage_229 = loadimage.load_image(image="2.jpg")
+        for human_cloeth in human_clothe_pairs:
+            
+            start_time = time.time()
+            debug_image_collection = []
 
-        imageresizekj_398 = imageresizekj.resize(
-            width=1024,
-            height=1024,
-            upscale_method="nearest-exact",
-            keep_proportion=True,
-            divisible_by=2,
-            crop="disabled",
-            image=get_value_at_index(loadimage_229, 0),
-        )
+            human_id = human_cloeth['human_id']
 
-        loadimagemask_432 = loadimagemask.load_image(image="2_mask.jpg", channel="red")
+            save_img_res = f'{save_dir}{human_id}_res_{lego_version}.png'
+            if os.path.exists(save_img_res):
+                bar.update(1)
+                continue
+            
 
-        resizemask_433 = resizemask.resize(
-            width=get_value_at_index(imageresizekj_398, 1),
-            height=get_value_at_index(imageresizekj_398, 2),
-            keep_proportions=False,
-            upscale_method="nearest-exact",
-            crop="disabled",
-            mask=get_value_at_index(loadimagemask_432, 0),
-        )
+            human_img = Image.open(human_cloeth['human_path'])
+            loadimage_229 = (pil2tensor(human_img), )  # B, H, W, C = image.shape  not enough values to unpack (expected 4, got 3)
+            # loadimage_229 = loadimage.load_image(image="2.jpg")
 
-        growmaskwithblur_337 = growmaskwithblur.expand_mask(
-            expand=15,
-            incremental_expandrate=0,
-            tapered_corners=True,
-            flip_input=False,
-            blur_radius=10,
-            lerp_alpha=1,
-            decay_factor=1,
-            fill_holes=False,
-            mask=get_value_at_index(resizemask_433, 0),
-        )
+            # loadimagemask_432 = loadimagemask.load_image(image="2_mask.jpg", channel="red")
+            mask_img = Image.open(human_cloeth['human_mask_path'])
+            loadimagemask_432 = (pilmask2tensor(mask_img),)
 
-        layerutility_imagescalebyaspectratio_v2_267 = (
-            layerutility_imagescalebyaspectratio_v2.image_scale_by_aspect_ratio(
-                aspect_ratio="original",
-                proportional_width=1,
-                proportional_height=1,
-                fit="crop",
-                method="lanczos",
-                round_to_multiple="8",
-                scale_to_side="longest",
-                scale_to_length=1280,
-                background_color="#000000",
-                image=get_value_at_index(imageresizekj_398, 0),
-                mask=get_value_at_index(growmaskwithblur_337, 0),
+            cloth_img = Image.open(human_cloeth['cloth_path'])
+            loadimage_228 = (pil2tensor(cloth_img), )
+            # loadimage_228 = loadimage.load_image(image="1 (1).jpg")
+
+            imageresizekj_398 = imageresizekj.resize(
+                width=1024,
+                height=1024,
+                upscale_method="nearest-exact",
+                keep_proportion=True,
+                divisible_by=2,
+                crop="disabled",
+                image=get_value_at_index(loadimage_229, 0),
             )
-        )
 
-        loadimage_228 = loadimage.load_image(image="1 (1).jpg")
+            resizemask_433 = resizemask.resize(
+                width=get_value_at_index(imageresizekj_398, 1),
+                height=get_value_at_index(imageresizekj_398, 2),
+                keep_proportions=False,
+                upscale_method="nearest-exact",
+                crop="disabled",
+                mask=get_value_at_index(loadimagemask_432, 0),
+            )
 
-        layerutility_imagemaskscaleas_268 = (
-            layerutility_imagemaskscaleas.image_mask_scale_as(
-                fit="letterbox",
-                method="lanczos",
-                scale_as=get_value_at_index(
+            growmaskwithblur_337 = growmaskwithblur.expand_mask(
+                expand=15,
+                incremental_expandrate=0,
+                tapered_corners=True,
+                flip_input=False,
+                blur_radius=10,
+                lerp_alpha=1,
+                decay_factor=1,
+                fill_holes=False,
+                mask=get_value_at_index(resizemask_433, 0),
+            )
+
+            layerutility_imagescalebyaspectratio_v2_267 = (
+                layerutility_imagescalebyaspectratio_v2.image_scale_by_aspect_ratio(
+                    aspect_ratio="original",
+                    proportional_width=1,
+                    proportional_height=1,
+                    fit="crop",
+                    method="lanczos",
+                    round_to_multiple="8",
+                    scale_to_side="longest",
+                    scale_to_length=1280,
+                    background_color="#000000",
+                    image=get_value_at_index(imageresizekj_398, 0),
+                    mask=get_value_at_index(growmaskwithblur_337, 0),
+                )
+            )
+
+            layerutility_imagemaskscaleas_268 = (
+                layerutility_imagemaskscaleas.image_mask_scale_as(
+                    fit="letterbox",
+                    method="lanczos",
+                    scale_as=get_value_at_index(
+                        layerutility_imagescalebyaspectratio_v2_267, 0
+                    ),
+                    image=get_value_at_index(loadimage_228, 0),
+                )
+            )
+
+            layermask_birefnetultrav2_271 = layermask_birefnetultrav2.birefnet_ultra_v2(
+                detail_method="VITMatte",
+                detail_erode=4,
+                detail_dilate=2,
+                black_point=0.01,
+                white_point=0.4,
+                process_detail=True,
+                device="cuda",
+                max_megapixels=2,
+                image=get_value_at_index(layerutility_imagemaskscaleas_268, 0),
+                birefnet_model=get_value_at_index(layermask_loadbirefnetmodelv2_272, 0),
+            )
+
+            layerutility_imageremovealpha_273 = (
+                layerutility_imageremovealpha.image_remove_alpha(
+                    fill_background=True,
+                    background_color="#000000",
+                    RGBA_image=get_value_at_index(layermask_birefnetultrav2_271, 0),
+                )
+            )
+
+            clipvisionencode_172 = clipvisionencode.encode(
+                crop="center",
+                clip_vision=get_value_at_index(clipvisionloader_329, 0),
+                image=get_value_at_index(layerutility_imageremovealpha_273, 0),
+            )
+
+            cliptextencodeflux_323 = cliptextencodeflux.encode(
+                clip_l="",
+                t5xxl="",
+                guidance=30,
+                clip=get_value_at_index(dualcliploader_322, 0),
+            )
+
+            cliptextencodeflux_325 = cliptextencodeflux.encode(
+                clip_l="",
+                t5xxl="",
+                guidance=30,
+                clip=get_value_at_index(dualcliploader_322, 0),
+            )
+
+            easy_imageconcat_275 = easy_imageconcat.concat(
+                direction="right",
+                match_image_size=False,
+                image1=get_value_at_index(layerutility_imageremovealpha_273, 0),
+                image2=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 0),
+            )
+
+            solidmask_278 = solidmask.solid(
+                value=0,
+                width=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 3),
+                height=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 4),
+            )
+
+            masktoimage = NODE_CLASS_MAPPINGS["MaskToImage"]()
+            masktoimage_281 = masktoimage.mask_to_image(
+                mask=get_value_at_index(solidmask_278, 0)
+            )
+
+            masktoimage_282 = masktoimage.mask_to_image(
+                mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 1)
+            )
+
+            easy_imageconcat_280 = easy_imageconcat.concat(
+                direction="right",
+                match_image_size=False,
+                image1=get_value_at_index(masktoimage_281, 0),
+                image2=get_value_at_index(masktoimage_282, 0),
+            )
+
+            imagetomask_283 = imagetomask.image_to_mask(
+                channel="red", image=get_value_at_index(easy_imageconcat_280, 0)
+            )
+
+            inpaintmodelconditioning_220 = inpaintmodelconditioning.encode(
+                noise_mask=True,
+                positive=get_value_at_index(cliptextencodeflux_323, 0),
+                negative=get_value_at_index(cliptextencodeflux_325, 0),
+                vae=get_value_at_index(vaeloader_328, 0),
+                pixels=get_value_at_index(easy_imageconcat_275, 0),
+                mask=get_value_at_index(imagetomask_283, 0),
+            )
+
+
+            layerutility_getimagesize_321 = layerutility_getimagesize.get_image_size(
+                image=get_value_at_index(easy_imageconcat_275, 0)
+            )
+
+            # 
+            modelsamplingflux_320 = modelsamplingflux.patch(  
+                max_shift=1.2000000000000002,
+                base_shift=0.5,
+                width=get_value_at_index(layerutility_getimagesize_321, 0),
+                height=get_value_at_index(layerutility_getimagesize_321, 1),
+                model=get_value_at_index(pathchsageattentionkj_449, 0),
+            )
+
+            
+            stylemodelapply_171 = stylemodelapply.apply_stylemodel(
+                strength=1,
+                strength_type="multiply",
+                conditioning=get_value_at_index(inpaintmodelconditioning_220, 0),
+                style_model=get_value_at_index(stylemodelloader_330, 0),
+                clip_vision_output=get_value_at_index(clipvisionencode_172, 0),
+            )
+
+            fluxguidance_223 = fluxguidance.append(
+                guidance=30, conditioning=get_value_at_index(stylemodelapply_171, 0)
+            )
+
+            ksampler_102 = ksampler.sample(
+                seed=random.randint(1, 2**64),
+                steps=8,
+                cfg=1,
+                sampler_name="euler",
+                scheduler="beta",
+                denoise=1,
+                model=get_value_at_index(modelsamplingflux_320, 0),
+                positive=get_value_at_index(fluxguidance_223, 0),
+                negative=get_value_at_index(inpaintmodelconditioning_220, 1),
+                latent_image=get_value_at_index(inpaintmodelconditioning_220, 2),
+            )
+
+            vaedecode_106 = vaedecode.decode(
+                samples=get_value_at_index(ksampler_102, 0),
+                vae=get_value_at_index(vaeloader_328, 0),
+            )
+
+            easy_imagesplitgrid_294 = easy_imagesplitgrid.doit(
+                row=1, column=2, images=get_value_at_index(vaedecode_106, 0)
+            )
+
+            easy_imagessplitimage_299 = easy_imagessplitimage.split(
+                images=get_value_at_index(easy_imagesplitgrid_294, 0)
+            )
+
+            growmask_440 = growmask.expand_mask(
+                expand=313,
+                tapered_corners=True,
+                mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 1),
+            )
+
+            maskblur_441 = maskblur.execute(
+                amount=13, device="auto", mask=get_value_at_index(growmask_440, 0)
+            )
+
+            imagecompositemasked_439 = imagecompositemasked.composite(
+                x=0,
+                y=0,
+                resize_source=False,
+                destination=get_value_at_index(
                     layerutility_imagescalebyaspectratio_v2_267, 0
                 ),
-                image=get_value_at_index(loadimage_228, 0),
+                source=get_value_at_index(easy_imagessplitimage_299, 1),
+                mask=get_value_at_index(maskblur_441, 0),
             )
-        )
 
-        layermask_birefnetultrav2_271 = layermask_birefnetultrav2.birefnet_ultra_v2(
-            detail_method="VITMatte",
-            detail_erode=4,
-            detail_dilate=2,
-            black_point=0.01,
-            white_point=0.4,
-            process_detail=True,
-            device="cuda",
-            max_megapixels=2,
-            image=get_value_at_index(layerutility_imagemaskscaleas_268, 0),
-            birefnet_model=get_value_at_index(layermask_loadbirefnetmodelv2_272, 0),
-        )
-
-        layerutility_imageremovealpha_273 = (
-            layerutility_imageremovealpha.image_remove_alpha(
-                fill_background=True,
-                background_color="#000000",
-                RGBA_image=get_value_at_index(layermask_birefnetultrav2_271, 0),
+            growmaskwithblur_569 = growmaskwithblur.expand_mask(
+                expand=20,
+                incremental_expandrate=0,
+                tapered_corners=True,
+                flip_input=False,
+                blur_radius=15.600000000000001,
+                lerp_alpha=1,
+                decay_factor=1,
+                fill_holes=False,
+                mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 1),
             )
-        )
 
-        clipvisionencode_172 = clipvisionencode.encode(
-            crop="center",
-            clip_vision=get_value_at_index(clipvisionloader_329, 0),
-            image=get_value_at_index(layerutility_imageremovealpha_273, 0),
-        )
-
-        cliptextencodeflux_323 = cliptextencodeflux.encode(
-            clip_l="",
-            t5xxl="",
-            guidance=30,
-            clip=get_value_at_index(dualcliploader_322, 0),
-        )
-
-        cliptextencodeflux_325 = cliptextencodeflux.encode(
-            clip_l="",
-            t5xxl="",
-            guidance=30,
-            clip=get_value_at_index(dualcliploader_322, 0),
-        )
-
-        easy_imageconcat_275 = easy_imageconcat.concat(
-            direction="right",
-            match_image_size=False,
-            image1=get_value_at_index(layerutility_imageremovealpha_273, 0),
-            image2=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 0),
-        )
-
-        solidmask_278 = solidmask.solid(
-            value=0,
-            width=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 3),
-            height=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 4),
-        )
-
-        masktoimage = NODE_CLASS_MAPPINGS["MaskToImage"]()
-        masktoimage_281 = masktoimage.mask_to_image(
-            mask=get_value_at_index(solidmask_278, 0)
-        )
-
-        masktoimage_282 = masktoimage.mask_to_image(
-            mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 1)
-        )
-
-        easy_imageconcat_280 = easy_imageconcat.concat(
-            direction="right",
-            match_image_size=False,
-            image1=get_value_at_index(masktoimage_281, 0),
-            image2=get_value_at_index(masktoimage_282, 0),
-        )
-
-        imagetomask_283 = imagetomask.image_to_mask(
-            channel="red", image=get_value_at_index(easy_imageconcat_280, 0)
-        )
-
-        inpaintmodelconditioning_220 = inpaintmodelconditioning.encode(
-            noise_mask=True,
-            positive=get_value_at_index(cliptextencodeflux_323, 0),
-            negative=get_value_at_index(cliptextencodeflux_325, 0),
-            vae=get_value_at_index(vaeloader_328, 0),
-            pixels=get_value_at_index(easy_imageconcat_275, 0),
-            mask=get_value_at_index(imagetomask_283, 0),
-        )
-
-
-        layerutility_getimagesize_321 = layerutility_getimagesize.get_image_size(
-            image=get_value_at_index(easy_imageconcat_275, 0)
-        )
-
-        # 
-        modelsamplingflux_320 = modelsamplingflux.patch(  
-            max_shift=1.2000000000000002,
-            base_shift=0.5,
-            width=get_value_at_index(layerutility_getimagesize_321, 0),
-            height=get_value_at_index(layerutility_getimagesize_321, 1),
-            model=get_value_at_index(pathchsageattentionkj_449, 0),
-        )
-
-        
-        stylemodelapply_171 = stylemodelapply.apply_stylemodel(
-            strength=1,
-            strength_type="multiply",
-            conditioning=get_value_at_index(inpaintmodelconditioning_220, 0),
-            style_model=get_value_at_index(stylemodelloader_330, 0),
-            clip_vision_output=get_value_at_index(clipvisionencode_172, 0),
-        )
-
-        fluxguidance_223 = fluxguidance.append(
-            guidance=30, conditioning=get_value_at_index(stylemodelapply_171, 0)
-        )
-
-        ksampler_102 = ksampler.sample(
-            seed=random.randint(1, 2**64),
-            steps=8,
-            cfg=1,
-            sampler_name="euler",
-            scheduler="beta",
-            denoise=1,
-            model=get_value_at_index(modelsamplingflux_320, 0),
-            positive=get_value_at_index(fluxguidance_223, 0),
-            negative=get_value_at_index(inpaintmodelconditioning_220, 1),
-            latent_image=get_value_at_index(inpaintmodelconditioning_220, 2),
-        )
-
-        vaedecode_106 = vaedecode.decode(
-            samples=get_value_at_index(ksampler_102, 0),
-            vae=get_value_at_index(vaeloader_328, 0),
-        )
-
-        easy_imagesplitgrid_294 = easy_imagesplitgrid.doit(
-            row=1, column=2, images=get_value_at_index(vaedecode_106, 0)
-        )
-
-        easy_imagessplitimage_299 = easy_imagessplitimage.split(
-            images=get_value_at_index(easy_imagesplitgrid_294, 0)
-        )
-
-        growmask_440 = growmask.expand_mask(
-            expand=313,
-            tapered_corners=True,
-            mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 1),
-        )
-
-        maskblur_441 = maskblur.execute(
-            amount=13, device="auto", mask=get_value_at_index(growmask_440, 0)
-        )
-
-        imagecompositemasked_439 = imagecompositemasked.composite(
-            x=0,
-            y=0,
-            resize_source=False,
-            destination=get_value_at_index(
-                layerutility_imagescalebyaspectratio_v2_267, 0
-            ),
-            source=get_value_at_index(easy_imagessplitimage_299, 1),
-            mask=get_value_at_index(maskblur_441, 0),
-        )
-
-        growmaskwithblur_569 = growmaskwithblur.expand_mask(
-            expand=20,
-            incremental_expandrate=0,
-            tapered_corners=True,
-            flip_input=False,
-            blur_radius=15.600000000000001,
-            lerp_alpha=1,
-            decay_factor=1,
-            fill_holes=False,
-            mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 1),
-        )
-
-        growmaskwithblur_584 = growmaskwithblur.expand_mask(
-            expand=-10,
-            incremental_expandrate=0,
-            tapered_corners=True,
-            flip_input=False,
-            blur_radius=10,
-            lerp_alpha=1,
-            decay_factor=1,
-            fill_holes=False,
-            mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 1),
-        )
-
-        masks_subtract_577 = masks_subtract.subtract_masks(
-            masks_a=get_value_at_index(growmaskwithblur_569, 0),
-            masks_b=get_value_at_index(growmaskwithblur_584, 0),
-        )
-
-        layerutility_imagescalebyaspectratio_v2_557 = (
-            layerutility_imagescalebyaspectratio_v2.image_scale_by_aspect_ratio(
-                aspect_ratio="original",
-                proportional_width=1,
-                proportional_height=1,
-                fit="letterbox",
-                method="nearest",
-                round_to_multiple="None",
-                scale_to_side="longest",
-                scale_to_length=1536,
-                background_color="#000000",
-                image=get_value_at_index(imagecompositemasked_439, 0),
-                mask=get_value_at_index(masks_subtract_577, 0),
+            growmaskwithblur_584 = growmaskwithblur.expand_mask(
+                expand=-10,
+                incremental_expandrate=0,
+                tapered_corners=True,
+                flip_input=False,
+                blur_radius=10,
+                lerp_alpha=1,
+                decay_factor=1,
+                fill_holes=False,
+                mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_267, 1),
             )
-        )
 
-        inpaintmodelconditioning_560 = inpaintmodelconditioning.encode(
-            noise_mask=False,
-            positive=get_value_at_index(cliptextencodeflux_323, 0),
-            negative=get_value_at_index(cliptextencodeflux_325, 0),
-            vae=get_value_at_index(vaeloader_328, 0),
-            pixels=get_value_at_index(layerutility_imagescalebyaspectratio_v2_557, 0),
-            mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_557, 1),
-        )
+            masks_subtract_577 = masks_subtract.subtract_masks(
+                masks_a=get_value_at_index(growmaskwithblur_569, 0),
+                masks_b=get_value_at_index(growmaskwithblur_584, 0),
+            )
 
+            layerutility_imagescalebyaspectratio_v2_557 = (
+                layerutility_imagescalebyaspectratio_v2.image_scale_by_aspect_ratio(
+                    aspect_ratio="original",
+                    proportional_width=1,
+                    proportional_height=1,
+                    fit="letterbox",
+                    method="nearest",
+                    round_to_multiple="None",
+                    scale_to_side="longest",
+                    scale_to_length=1536,
+                    background_color="#000000",
+                    image=get_value_at_index(imagecompositemasked_439, 0),
+                    mask=get_value_at_index(masks_subtract_577, 0),
+                )
+            )
 
-        for q in range(1):
+            inpaintmodelconditioning_560 = inpaintmodelconditioning.encode(
+                noise_mask=False,
+                positive=get_value_at_index(cliptextencodeflux_323, 0),
+                negative=get_value_at_index(cliptextencodeflux_325, 0),
+                vae=get_value_at_index(vaeloader_328, 0),
+                pixels=get_value_at_index(layerutility_imagescalebyaspectratio_v2_557, 0),
+                mask=get_value_at_index(layerutility_imagescalebyaspectratio_v2_557, 1),
+            )
+            # pure inf
             get_image_size_436 = get_image_size.get_size(
                 image=get_value_at_index(loadimage_229, 0)
             )
@@ -567,10 +652,50 @@ def main():
                 image_b=get_value_at_index(masktoimage_586, 0),
             )
 
-            saveimage_588 = saveimage.save_images(
-                filename_prefix="tryon_v4",
-                images=get_value_at_index(imagecompositemasked_527, 0),
-            )
+            # saveimage_588 = saveimage.save_images(
+            #     filename_prefix="tryon_v4",
+            #     images=get_value_at_index(imagecompositemasked_527, 0),
+            # )
+            endtime = time.time()
+            res_image = tensor2pil(imagecompositemasked_527[0])
+
+            human_resized = tensor2pil(layerutility_imagescalebyaspectratio_v2_267[0])
+            mask_resized = tensor2pil(layerutility_imagescalebyaspectratio_v2_267[0])
+            cloth_rmbg = tensor2pil(layerutility_imageremovealpha_273[0])
+            human_cloth_concated = tensor2pil(easy_imageconcat_275[0])
+            generated_raw = tensor2pil(get_value_at_index(easy_imagessplitimage_299, 1))
+            repaint_area_mask = tensor2pil(masks_subtract_577[0])
+            repaint_area_res = tensor2pil(imagescale_528[0])
+            cost_time = f'{endtime - start_time:.2f}'
+            debug_image_collection.extend(
+                [human_img, 
+                    draw_text(cloth_rmbg.resize(size=human_img.size),
+                        human_cloeth['human_path'].split('/')[-1] ),
+                    draw_text(res_image, f"generated_res cost:{cost_time}"),
+                    
+                    # draw_text(human_cloth_concated, "human_cloth_concated"),
+                    draw_text(generated_raw, "generated_raw"),
+                    draw_text(repaint_area_mask, "repaint_area_mask"),
+                    draw_text(repaint_area_res, "repaint_area_res"),
+                    ]
+                )
+            debug_img = make_image_grid(debug_image_collection, cols=3, rows=2).convert('RGB')
+            debug_img.save(f'{save_dir}{human_id}_debug_{lego_version}.jpg')
+            res_image.save(f'{save_dir}{human_id}_res_{lego_version}.png')
+            ref.write(f"id:{human_id} {lego_version} cost: {cost_time} sec")
+            bar.update(1)
+            
+            # break
+
+                
+def timing_decorator(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        print(f"{func.__name__} took {end_time - start_time} seconds to run.")
+        return result
+    return wrapper
 
 
 if __name__ == "__main__":
