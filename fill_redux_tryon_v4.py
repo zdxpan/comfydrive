@@ -136,11 +136,12 @@ from nodes import NODE_CLASS_MAPPINGS
 
 import glob
 from itertools import product
+lego_version = 'tryon_v4'
+
 base_dir = '/home/dell/study/test_comfy/'
 save_dir = '/home/dell/study/test_comfy/img/'
-record_log = '/home/dell/study/test_comfy/1tryon_v4_1_a6000.txt'
+record_log = f'/home/dell/study/test_comfy/1_{lego_version}_1_a600.txt'
 
-lego_version = 'tryon_v4'
 
 cloth_ = base_dir + 'clothe/*.jpg'
 human_ = base_dir + 'motel/'
@@ -181,28 +182,61 @@ def draw_text(image, text, position=(50, 50), font_size=45, color=(255, 255, 255
     
     return image
 
+# Save the data
+def save_clip_data(data, path):
+    data = data[0]
+    torch.save({
+        'tensor': data[0],  # Save the tensor
+        'pooled_output': data[1]['pooled_output'],
+        'guidance': data[1]['guidance']
+    }, path)
+
+# Load the data
+def load_clip_data(path):
+    data = torch.load(path)
+    data = [data['tensor'], {
+        'pooled_output': data['pooled_output'],
+        'guidance': data['guidance']
+    }]
+    return [data]
+
+cond1_save_path = '/home/dell/study/test_comfy/clip_data_cond1.pt'
+cond2_save_path = '/home/dell/study/test_comfy/clip_data_cond2.pt'
 
 def main():
     import_custom_nodes()
     # model loade ------
     clipvisionloader = NODE_CLASS_MAPPINGS["CLIPVisionLoader"]()
     clipvisionloader_329 = clipvisionloader.load_clip( clip_name="sigclip_vision_patch14_384.safetensors" )
-    dualcliploader = NODE_CLASS_MAPPINGS["DualCLIPLoader"]()
-    dualcliploader_322 = dualcliploader.load_clip(
-        clip_name1="t5xxl_fp16.safetensors", clip_name2="clip_l.safetensors",
-        type="flux", device="default",
-    )
+    cond1_save_path = '/home/dell/study/test_comfy/clip_data_cond1.pt'
+    cond2_save_path = '/home/dell/study/test_comfy/clip_data_cond2.pt'
+    
 
-    cliptextencodeflux = NODE_CLASS_MAPPINGS["CLIPTextEncodeFlux"]()
-    cliptextencodeflux_323 = cliptextencodeflux.encode(
-        clip_l="", t5xxl="", guidance=30,
-        clip=get_value_at_index(dualcliploader_322, 0),
-    )
+    # Load later
+    if os.path.exists(cond1_save_path):
+        load_cond1 = load_clip_data(cond1_save_path)
+        load_cond2 = load_clip_data(cond2_save_path)
+    else:
+        dualcliploader = NODE_CLASS_MAPPINGS["DualCLIPLoader"]()
+        dualcliploader_322 = dualcliploader.load_clip(
+            clip_name1="t5xxl_fp16.safetensors", clip_name2="clip_l.safetensors",
+            type="flux", device="default",
+        )
 
-    cliptextencodeflux_325 = cliptextencodeflux.encode(
-        clip_l="", t5xxl="", guidance=30,
-        clip=get_value_at_index(dualcliploader_322, 0),
-    )
+        cliptextencodeflux = NODE_CLASS_MAPPINGS["CLIPTextEncodeFlux"]()
+        cliptextencodeflux_323 = cliptextencodeflux.encode(
+            clip_l="", t5xxl="", guidance=30,
+            clip=get_value_at_index(dualcliploader_322, 0),
+        )
+
+        cliptextencodeflux_325 = cliptextencodeflux.encode(
+            clip_l="", t5xxl="", guidance=30,
+            clip=get_value_at_index(dualcliploader_322, 0),
+        )
+        save_clip_data(cliptextencodeflux_323[0], cond1_save_path)
+        save_clip_data(cliptextencodeflux_325[0], cond2_save_path)
+    cliptextencodeflux_323 = (load_cond1,)
+    cliptextencodeflux_325 = (load_cond2,)
 
     vaeloader = NODE_CLASS_MAPPINGS["VAELoader"]()
     vaeloader_328 = vaeloader.load_vae( vae_name="flux_vae/diffusion_pytorch_model.safetensors" )
@@ -275,21 +309,19 @@ def main():
     image_comparer_rgthree = NODE_CLASS_MAPPINGS["Image Comparer (rgthree)"]()
     saveimage = NODE_CLASS_MAPPINGS["SaveImage"]()
 
-    bar = tqdm.tqdm(len(human_clothe_pairs))
-    with torch.inference_mode() , open(record_log, 'w') as ref:
+    with torch.inference_mode() , open(record_log, 'w') as ref, tqdm.tqdm(len(human_clothe_pairs)) as bar:
 
-        for human_cloeth in human_clothe_pairs:
+        for inx, human_cloeth in enumerate(human_clothe_pairs):
             
             start_time = time.time()
             debug_image_collection = []
 
             human_id = human_cloeth['human_id']
 
-            save_img_res = f'{save_dir}{human_id}_res_{lego_version}.png'
+            save_img_res = f'{save_dir}{human_id}_{inx}_res_{lego_version}.png'
             if os.path.exists(save_img_res):
                 bar.update(1)
                 continue
-            
 
             human_img = Image.open(human_cloeth['human_path'])
             loadimage_229 = (pil2tensor(human_img), )  # B, H, W, C = image.shape  not enough values to unpack (expected 4, got 3)
@@ -386,20 +418,6 @@ def main():
                 crop="center",
                 clip_vision=get_value_at_index(clipvisionloader_329, 0),
                 image=get_value_at_index(layerutility_imageremovealpha_273, 0),
-            )
-
-            cliptextencodeflux_323 = cliptextencodeflux.encode(
-                clip_l="",
-                t5xxl="",
-                guidance=30,
-                clip=get_value_at_index(dualcliploader_322, 0),
-            )
-
-            cliptextencodeflux_325 = cliptextencodeflux.encode(
-                clip_l="",
-                t5xxl="",
-                guidance=30,
-                clip=get_value_at_index(dualcliploader_322, 0),
             )
 
             easy_imageconcat_275 = easy_imageconcat.concat(
@@ -556,7 +574,7 @@ def main():
                     method="nearest",
                     round_to_multiple="None",
                     scale_to_side="longest",
-                    scale_to_length=1536,
+                    scale_to_length=1280,
                     background_color="#000000",
                     image=get_value_at_index(imagecompositemasked_439, 0),
                     mask=get_value_at_index(masks_subtract_577, 0),
@@ -667,22 +685,20 @@ def main():
             repaint_area_mask = tensor2pil(masks_subtract_577[0])
             repaint_area_res = tensor2pil(imagescale_528[0])
             cost_time = f'{endtime - start_time:.2f}'
-            debug_image_collection.extend(
-                [human_img, 
-                    draw_text(cloth_rmbg.resize(size=human_img.size),
+            debug_image_collection = [
+                human_img, 
+                draw_text(cloth_rmbg.resize(size=human_img.size),
                         human_cloeth['human_path'].split('/')[-1] ),
-                    draw_text(res_image, f"generated_res cost:{cost_time}"),
-                    
+                draw_text(res_image, f"generated_res cost:{cost_time}"),
                     # draw_text(human_cloth_concated, "human_cloth_concated"),
-                    draw_text(generated_raw, "generated_raw"),
-                    draw_text(repaint_area_mask, "repaint_area_mask"),
-                    draw_text(repaint_area_res, "repaint_area_res"),
-                    ]
-                )
+                draw_text(generated_raw, "generated_raw"),
+                draw_text(repaint_area_mask, "repaint_area_mask"),
+                draw_text(repaint_area_res, "repaint_area_res"),
+            ]
             debug_img = make_image_grid(debug_image_collection, cols=3, rows=2).convert('RGB')
-            debug_img.save(f'{save_dir}{human_id}_debug_{lego_version}.jpg')
-            res_image.save(f'{save_dir}{human_id}_res_{lego_version}.png')
-            ref.write(f"id:{human_id} {lego_version} cost: {cost_time} sec")
+            debug_img.save(f'{save_dir}{human_id}_{inx}_debug_{lego_version}.jpg')
+            res_image.save(f'{save_dir}{human_id}_{inx}_res_{lego_version}.png')
+            ref.write(f"id:{human_id} _{inx}_ {lego_version} cost: {cost_time} sec\n")
             bar.update(1)
             
             # break
