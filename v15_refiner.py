@@ -3,7 +3,11 @@ import random
 import sys
 from typing import Sequence, Mapping, Any, Union
 import torch
+from diffusers.utils import make_image_grid
 
+from src.util import (
+    tensor2pil, pil2tensor, pilmask2tensor, 
+)
 
 def get_value_at_index(obj: Union[Sequence, Mapping], index: int) -> Any:
     """Returns the value at the given index of a sequence or mapping.
@@ -160,7 +164,7 @@ def main():
 
         loadimage = NODE_CLASS_MAPPINGS["LoadImage"]()
         loadimage_16 = loadimage.load_image(image="2.jpg")
-
+        # skiped the upscale mode
         imagescaleby = NODE_CLASS_MAPPINGS["ImageScaleBy"]()
         imagescaleby_27 = imagescaleby.upscale(
             upscale_method="lanczos",
@@ -255,6 +259,12 @@ def main():
                 samples=get_value_at_index(samplercustom_20, 0),
                 vae=get_value_at_index(checkpointloadersimple_7, 2),
             )
+            res_image = tensor2pil(vaedecodetiled_5[0])
+            img_input = tensor2pil(loadimage_16[0])
+            debug_img = make_image_grid([img_input, res_image], cols=2, rows=1).convert('RGB')
+            debug_img.save('/home/dell/study/test_comfy/img/v15_upscaled.png')
+
+            
 
 
 if __name__ == "__main__":
