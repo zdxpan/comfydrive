@@ -28,6 +28,28 @@ def pilmask2tensor(mask_img):
     mask_tensor = mask_tensor.unsqueeze(0)
     return mask_tensor
 
+def pil2tensor(image: Image.Image) -> torch.Tensor:
+    return torch.from_numpy(np.array(image).astype(np.float32) / 255.0)[None,]
+
+
+def image2mask(image: Image.Image) -> torch.Tensor:
+    if isinstance(image, Image.Image):
+        image = pil2tensor(image)
+    return image.squeeze()[..., 0]
+
+def mask2image(mask: torch.Tensor) -> Image.Image:
+    if len(mask.shape) == 2:
+        mask = mask.unsqueeze(0)
+    return tensor2pil(mask)
+
+def RGB2RGBA(image: Image.Image, mask: Union[Image.Image, torch.Tensor]) -> Image.Image:
+    if isinstance(mask, torch.Tensor):
+        mask = mask2image(mask)
+    if mask.size != image.size:
+        mask = mask.resize(image.size, Image.Resampling.LANCZOS)
+    return Image.merge('RGBA', (*image.convert('RGB').split(), mask.convert('L')))
+
+
 def draw_text(image, text, position=(50, 50), font_size=45, color=(255, 255, 255)):  # 默认白色
     draw = ImageDraw.Draw(image)
     # 根据图像模式选择适当的颜色格式
@@ -164,4 +186,75 @@ def add_extra_model_paths() -> None:
     else:
         print("Could not find the extra_model_paths config file.")
 
+def import_custom_nodes() -> None:
+    """Find all custom nodes in the custom_nodes folder and add those node objects to NODE_CLASS_MAPPINGS
 
+    This function sets up a new asyncio event loop, initializes the PromptServer,
+    creates a PromptQueue, and initializes the custom nodes.
+    """
+    import asyncio
+    import execution
+    from nodes import init_extra_nodes
+    import server
+
+    # Creating a new event loop and setting it as the default loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # Creating an instance of PromptServer with the loop
+    server_instance = server.PromptServer(loop)
+    execution.PromptQueue(server_instance)
+
+    # Initializing custom nodes
+    init_extra_nodes()
+
+
+
+def extract_obj_in_box(self, image, mask):
+    # Convert from batch format [B,C,H,W] to [C,H,W]
+    img = image[0]
+    mask = masks[0]
+    # Find bounding box coordinates from mask
+    y_indices, x_indices = torch.where(mask > 0)
+    if len(y_indices) == 0 or len(x_indices) == 0:
+        return (image,)
+    bbox = [
+        x_indices.min().item(),
+        y_indices.min().item(),
+        x_indices.max().item() + 1,
+        y_indices.max().item() + 1
+    ]
+    
+    # Crop the object using bbox
+    cloth_obj = img[bbox[1]:bbox[3], bbox[0]:bbox[2], : ]
+    
+    # Get dimensions
+    h, w, _ = img.shape
+    h_, w_, _ = cloth_obj.shape
+    
+    # Check if dimensions are valid to avoid division by zero
+    if w_ == 0 or h_ == 0:
+        return (image,)
+
+    # Calculate scale to fit within original image
+    scale_ = min(w/w_, h/h_)
+    new_w, new_h = int(scale_ * w_), int(scale_ * h_)
+    
+    # Resize using interpolate
+    # image_tensor = cloth_obj.permute(2, 0, 1)  # HWC ->  CHW
+    cloth_obj = torch.nn.functional.interpolate(
+        cloth_obj.permute(2, 0, 1).unsqueeze(0),  size=(new_h, new_w),  mode='bilinear',  align_corners=False
+    ).squeeze(0).permute(1, 2, 0)
+    
+    # Create new blank image
+    obj_expand = torch.zeros_like(img)
+    
+    # Calculate paste coordinates
+    x = 0 if new_w == w else (w - new_w) // 2
+    y = 0 if new_h == h else (h - new_h) // 2
+    
+    # Paste the resized object
+    obj_expand[y:y+new_h, x:x+new_w, :] = cloth_obj
+    # tensor2pil(obj_expand.unsqueeze(0)).save('/home/dell/study/test_comfy/img/cloth_obj_resized_tensor.jpeg')
+    
+    return (obj_expand.unsqueeze(0),)

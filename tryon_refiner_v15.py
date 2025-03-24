@@ -7,7 +7,7 @@ import torch
 import tqdm, time, os
 from PIL import Image
 from src.util import (
-    tensor2pil, pil2tensor, pilmask2tensor, make_image_grid, draw_text
+    tensor2pil, pil2tensor, pilmask2tensor, make_image_grid, draw_text, zdxApplySageAtt
 )
 
 def get_value_at_index(obj: Union[Sequence, Mapping], index: int) -> Any:
@@ -232,7 +232,7 @@ class Refinerv1():
 
             alignyourstepsscheduler = NODE_CLASS_MAPPINGS["AlignYourStepsScheduler"]()
             alignyourstepsscheduler_677 = alignyourstepsscheduler.get_sigmas(
-                model_type="SD1", steps=30, denoise=0.30000000000000004
+                model_type="SD1", steps=30, denoise=0.4
             )
             controlnetapplyadvanced_699 = self.controlnetapplyadvanced.apply_controlnet(
                 strength=1,
@@ -268,26 +268,27 @@ class Refinerv1():
         return vaedecodetiled_679
 
 
-lego_version = '_refiner_v1'
+lego_version = 'tryon_refiner_speed_v4'
 save_dir = '/home/dell/study/test_comfy/img'
 
 import glob
 from itertools import product
-lego_version = 'tryon_v4'
+
 
 base_dir = '/home/dell/study/test_comfy/img/'
 record_log = f'/home/dell/study/test_comfy/1_{lego_version}_1_a600.txt'
 
-cloth_ = base_dir + 'clothe/*.jpg'
-human_ = base_dir + 'motel/'
+cloth_ = base_dir + 'human_mask/cloth_*.jpg'
+human_ = base_dir + 'human_mask/image_*.jpeg'
+mask_ = base_dir + 'human_mask/mask_*'
 clothes = glob.glob(cloth_)
-humans = glob.glob(human_ + '*')
-humans = [i for i in humans  if 'mask' not in i]
-human_dc = {int(i.split('/')[-1].split('.')[0]) : i for i in humans }
-human_dc = {k:v for k,v in human_dc.items() if k < 3}
+humans = glob.glob(human_)
+human_masks = glob.glob(mask_)
 
-human_masks = [i for i in glob.glob(human_ + '*')  if 'mask' in i]
-human_mask_dc = {int(i.split('/')[-1].split('_mask.')[0]) : i for i in human_masks }
+human_mask_dc = {int(i.split('mask_')[-1].split('.')[0]) : i for i in human_masks }
+human_dc = {int(i.split('image_')[-1].split('.')[0]): i for i in humans }
+human_dc = {k:v for k,v in human_dc.items() if k > 4}
+
 
 human_clothe_pairs = [
     {
@@ -299,13 +300,11 @@ human_clothe_pairs = [
     for human_id, human_path in human_dc.items()
     for cloth_path in clothes
 ]
+print('>>>>>>>>_humans_cunt:', len(human_clothe_pairs))
 
 save_dir = f'/home/dell/study/test_comfy/img/{lego_version}/'
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
-
-
-print('human_clothe_pairs', len(human_clothe_pairs))
 
 def main():
     import_custom_nodes()
@@ -629,6 +628,13 @@ def main():
             differentialdiffusion_327 = differentialdiffusion.apply(
                 model=get_value_at_index(loraloadermodelonly_447, 0)
             )
+            
+            applyf1sage_speed = zdxApplySageAtt()
+            applyf1sage_speed_752 = applyf1sage_speed.patch(
+                use_SageAttention=True,
+                model=get_value_at_index(differentialdiffusion_327, 0),
+            )
+
 
             modelsamplingflux = NODE_CLASS_MAPPINGS["ModelSamplingFlux"]()
             modelsamplingflux_320 = modelsamplingflux.patch(
@@ -636,7 +642,7 @@ def main():
                 base_shift=0.5,
                 width=get_value_at_index(layerutility_getimagesize_321, 0),
                 height=get_value_at_index(layerutility_getimagesize_321, 1),
-                model=get_value_at_index(differentialdiffusion_327, 0),
+                model=get_value_at_index(applyf1sage_speed_752, 0),
             )
 
             stylemodelapply = NODE_CLASS_MAPPINGS["StyleModelApply"]()
@@ -904,16 +910,16 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    # import_custom_nodes()
-    # loadimage = NODE_CLASS_MAPPINGS["LoadImage"]()
-    # loadimage_228 = loadimage.load_image(image="cloth_02.png")
-    # refiner = Refinerv1()
-    # refiner_res = refiner.forward(loadimage_228)
-    # debug_img = make_image_grid(
-    #     [
-    #         tensor2pil(loadimage_228[0]),
-    #         tensor2pil(refiner_res[0]),
-    #     ], cols=2, rows=1).convert('RGB')
-    # debug_img.save(f'{save_dir}/1_refiner_debug_{lego_version}.jpg')
+    # main()
+    import_custom_nodes()
+    loadimage = NODE_CLASS_MAPPINGS["LoadImage"]()
+    loadimage_228 = loadimage.load_image(image="cloth_02.png")
+    refiner = Refinerv1()
+    refiner_res = refiner.forward(loadimage_228)
+    debug_img = make_image_grid(
+        [
+            tensor2pil(loadimage_228[0]),
+            tensor2pil(refiner_res[0]),
+        ], cols=2, rows=1).convert('RGB')
+    debug_img.save(f'{save_dir}/1_refiner_debug_{lego_version}.jpg')
 
