@@ -50,7 +50,7 @@ def RGB2RGBA(image: Image.Image, mask: Union[Image.Image, torch.Tensor]) -> Imag
     return Image.merge('RGBA', (*image.convert('RGB').split(), mask.convert('L')))
 
 
-def draw_text(image, text, position=(50, 50), font_size=45, color=(255, 255, 255)):  # 默认白色
+def draw_text(image, text, font_path=None, position=(50, 50), font_size=45, color=(255, 255, 255)):  # 默认白色
     draw = ImageDraw.Draw(image)
     # 根据图像模式选择适当的颜色格式
     if image.mode == 'RGB':
@@ -60,7 +60,10 @@ def draw_text(image, text, position=(50, 50), font_size=45, color=(255, 255, 255
     elif image.mode in ['L', '1']:
         color = 255 if isinstance(color, tuple) else color  # 灰度图模式
     
-    font = ImageFont.load_default(size=font_size)
+    if font_path is not None:
+        font = ImageFont.truetype(font_path, font_size)
+    else:
+        font = ImageFont.load_default(size=font_size)
     
     # 绘制文本
     draw.text(position, text, font=font, fill=color)
