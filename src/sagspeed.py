@@ -1,13 +1,14 @@
 # must run at custom_nodes after custom nodes loaded!
-from util import (
+from src.util import (
     find_path, add_comfyui_directory_to_sys_path,
-    tensor2pil, pil2tensor, pilmask2tensor, make_image_grid, draw_text, zdxApplySageAtt
+    tensor2pil, pil2tensor, pilmask2tensor, make_image_grid, draw_text
 )
 
 from nodes import NODE_CLASS_MAPPINGS
 
 
 add_comfyui_directory_to_sys_path()
+
 from comfy.model_patcher import ModelPatcher
 
 class zdxApplySageAtt:

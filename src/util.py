@@ -9,6 +9,7 @@ import tqdm
 from PIL import Image, ImageDraw, ImageFont
 from diffusers.utils import make_image_grid
 
+# 不依赖任何comfyui的东西 --- 
 # code tide tool 
 # 工具：一般是:   ]()   实例化工具，这些对应的所有代码，部分都将放置在init之中~， 如何设计模板，才是最好的加载呢？
 #   -  将所有的
@@ -50,7 +51,7 @@ def RGB2RGBA(image: Image.Image, mask: Union[Image.Image, torch.Tensor]) -> Imag
     return Image.merge('RGBA', (*image.convert('RGB').split(), mask.convert('L')))
 
 
-def draw_text(image, text, font_path=None, position=(50, 50), font_size=45, color=(255, 255, 255)):  # 默认白色
+def draw_text(image, text, font_path=None, position=(50, 50), font_size=65, color=(255, 0, 0)):  # 默认白色
     draw = ImageDraw.Draw(image)
     # 根据图像模式选择适当的颜色格式
     if image.mode == 'RGB':
@@ -86,6 +87,67 @@ def load_clip_data(path):
         'guidance': data['guidance']
     }]
     return [data]
+
+def expand_face_box(box, width, height, expand_rate = 1.0):
+    left, top, right, bottom = box
+    face_w, face_h = right - left, bottom - top
+    face_w_dt = face_h_dt = max(int(face_w * expand_rate) , int(face_h * expand_rate))
+    center_x, center_y = left + face_w // 2, top + face_h // 2
+    face_w = face_h = max(face_w, face_h)
+    left, top = max(0, center_x - face_w // 2 - face_w_dt), max(0, center_y - face_h // 2 - face_h_dt)
+    right, bottom = min(width, center_x + face_w // 2 + face_w_dt), min(height, center_y + face_h // 2 + face_h_dt)
+    left, top, right, bottom = int(left), int(top), int(right), int(bottom)
+    return (left, top, right, bottom)
+
+class MaskSubtraction:
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+                    "required": {
+                        "masks_a": ("MASK",),
+                        "masks_b": ("MASK",),
+                    }
+                }
+
+    CATEGORY = "zdx/mask"
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("MASKS",)
+
+    FUNCTION = "subtract_masks"
+
+    def subtract_masks(self, masks_a, masks_b):
+        subtracted_masks = torch.clamp(masks_a - masks_b, 0, 255)
+        return (subtracted_masks,)
+
+class MaskAdd:
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+                    "required": {
+                        "masks_a": ("MASK",),
+                        "masks_b": ("MASK",),
+                    }
+                }
+
+    CATEGORY = "zdx/mask"
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("MASKS",)
+
+    FUNCTION = "add_masks"
+
+    def add_masks(self, masks_a, masks_b):
+        subtracted_masks = torch.clamp(masks_a + masks_b, 0, 255)
+        return (subtracted_masks,)
 
 
 # res_image = tensor2pil(imagecompositemasked_442[0])
@@ -261,3 +323,4 @@ def extract_obj_in_box(self, image, mask):
     # tensor2pil(obj_expand.unsqueeze(0)).save('/home/dell/study/test_comfy/img/cloth_obj_resized_tensor.jpeg')
     
     return (obj_expand.unsqueeze(0),)
+

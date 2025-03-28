@@ -9,6 +9,7 @@ from PIL import Image
 from src.util import (
     tensor2pil, pil2tensor, pilmask2tensor, make_image_grid, draw_text, zdxApplySageAtt
 )
+from src.mask_seg_det import HumanFashionMaskDetailer, HumanSegmentParts, FashionSegDetect
 
 def get_value_at_index(obj: Union[Sequence, Mapping], index: int) -> Any:
     """Returns the value at the given index of a sequence or mapping.
@@ -308,6 +309,12 @@ if not os.path.exists(save_dir):
 
 def main():
     import_custom_nodes()
+
+    fashion_cls_model = '/home/dell/study/comfyui/models/yolo/deepfashion2_yolov8s-seg.pt'
+    human_fashion_mask_model = HumanFashionMaskDetailer()
+    fashion_detect_model =  FashionSegDetect(fashion_cls_model)
+    fashion_det_res = fashion_detect_model(fashion_images[0])  #  in:PIL or path  (['long_sleeved_shirt', 'shorts'], {'down_short', 'upper_long'})
+
     # initiate an refiner model
     refiner = Refinerv1()
     clipvisionloader = NODE_CLASS_MAPPINGS["CLIPVisionLoader"]()
@@ -771,65 +778,6 @@ def main():
                 maskblur_445 = maskblur.execute(
                     amount=30, device="auto", mask=get_value_at_index(growmask_444, 0)
                 )
-                if 0:
-                    freeu_v2_691 = freeu_v2.patch(
-                        b1=0.9,
-                        b2=1.08,
-                        s1=0.9500000000000001,
-                        s2=0.8,
-                        model=get_value_at_index(loraloader_686, 0),
-                    )
-
-                    perturbedattentionguidance_675 = perturbedattentionguidance.patch(
-                        scale=1, model=get_value_at_index(freeu_v2_691, 0)
-                    )
-
-                    automatic_cfg_688 = automatic_cfg.patch(
-                        hard_mode=True,
-                        boost=True,
-                        model=get_value_at_index(perturbedattentionguidance_675, 0),
-                    )
-
-                    tileddiffusion_698 = tileddiffusion.apply(
-                        method="MultiDiffusion",
-                        tile_width=1024,
-                        tile_height=1024,
-                        tile_overlap=128,
-                        tile_batch_size=4,
-                        model=get_value_at_index(automatic_cfg_688, 0),
-                    )
-
-                    controlnetapplyadvanced_699 = controlnetapplyadvanced.apply_controlnet(
-                        strength=1,
-                        start_percent=0.1,
-                        end_percent=1,
-                        positive=get_value_at_index(cliptextencode_684, 0),
-                        negative=get_value_at_index(cliptextencode_676, 0),
-                        control_net=get_value_at_index(controlnetloader_697, 0),
-                        image=get_value_at_index(imagecompositemasked_439, 0),
-                    )
-
-                    samplercustom_689 = samplercustom.sample(
-                        add_noise=True,
-                        noise_seed=random.randint(1, 2**64),
-                        cfg=8,
-                        model=get_value_at_index(tileddiffusion_698, 0),
-                        positive=get_value_at_index(controlnetapplyadvanced_699, 0),
-                        negative=get_value_at_index(controlnetapplyadvanced_699, 1),
-                        sampler=get_value_at_index(ksamplerselect_678, 0),
-                        sigmas=get_value_at_index(alignyourstepsscheduler_677, 0),
-                        latent_image=get_value_at_index(vaeencodetiled_693, 0),
-                    )
-
-                    vaedecodetiled_679 = vaedecodetiled.decode(
-                        tile_size=1024,
-                        overlap=64,
-                        temporal_size=64,
-                        temporal_overlap=8,
-                        samples=get_value_at_index(samplercustom_689, 0),
-                        vae=get_value_at_index(checkpointloadersimple_685, 2),
-                    )
-                
                 
                 refiner_res = refiner.forward(imagecompositemasked_439)
                 vaedecodetiled_679 = refiner_res

@@ -1,7 +1,9 @@
 # must run at custom_nodes after custom nodes loaded!
-from util import (
-    find_path, add_comfyui_directory_to_sys_path, add_extra_model_paths,
-    tensor2pil, pil2tensor, pilmask2tensor, make_image_grid, draw_text, zdxApplySageAtt
+import random
+import torch
+from src.util import (
+    find_path, add_comfyui_directory_to_sys_path, add_extra_model_paths,get_value_at_index,
+    tensor2pil, pil2tensor, pilmask2tensor, make_image_grid, draw_text
 )
 
 from nodes import NODE_CLASS_MAPPINGS
@@ -120,7 +122,7 @@ class Refinerv1():
 
             alignyourstepsscheduler = NODE_CLASS_MAPPINGS["AlignYourStepsScheduler"]()
             alignyourstepsscheduler_677 = alignyourstepsscheduler.get_sigmas(
-                model_type="SD1", steps=30, denoise=0.4
+                model_type="SD1", steps=30, denoise=0.1
             )
             controlnetapplyadvanced_699 = self.controlnetapplyadvanced.apply_controlnet(
                 strength=1,
