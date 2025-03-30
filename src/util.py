@@ -99,6 +99,49 @@ def expand_face_box(box, width, height, expand_rate = 1.0):
     left, top, right, bottom = int(left), int(top), int(right), int(bottom)
     return (left, top, right, bottom)
 
+def expand_bbox(bbox, image_width, image_height, expand_ratio=0.1):
+    """
+    扩展bbox的大小，同时确保不超出图像边界。
+    
+    参数:
+    bbox: 列表或元组，格式为 [x_min_ratio, y_min_ratio, x_max_ratio, y_max_ratio]，为归一化的比率形式。
+    image_width: 图像宽度（像素）
+    image_height: 图像高度（像素）
+    expand_ratio: 扩展比例，默认为0.1（10%）
+    
+    返回:
+    expanded_bbox: 扩展后的bbox，格式与输入相同（归一化的比率形式）
+    """
+    assert bbox[0] <= 1.0 or bbox[1] <= 1.0 or bbox[2] <= 1.0 or bbox[3] <= 1.0
+    x_min = bbox[0] * image_width
+    y_min = bbox[1] * image_height
+    x_max = bbox[2] * image_width
+    y_max = bbox[3] * image_height
+    
+    width = x_max - x_min
+    height = y_max - y_min
+    
+    width_expand = width * expand_ratio
+    height_expand = height * expand_ratio
+    
+    new_x_min = max(0, x_min - width_expand / 2)  # 确保不小于0
+    new_y_min = max(0, y_min - height_expand / 2)  # 确保不小于0
+    new_x_max = min(image_width, x_max + width_expand / 2)  # 确保不超过图像宽度
+    new_y_max = min(image_height, y_max + height_expand / 2)  # 确保不超过图像高度
+    
+    expanded_bbox = [
+        new_x_min / image_width,
+        new_y_min / image_height,
+        new_x_max / image_width,
+        new_y_max / image_height
+    ]
+    expanded_bbox_mx = [
+        new_x_min, new_y_min,
+        new_x_max, new_y_max
+    ]
+    
+    return expanded_bbox, expanded_bbox_mx
+
 class MaskSubtraction:
 
     def __init__(self):
@@ -276,6 +319,7 @@ def import_custom_nodes() -> None:
 
 
 def extract_obj_in_box(self, image, mask):
+    # 特征增强。将主体突出
     # Convert from batch format [B,C,H,W] to [C,H,W]
     img = image[0]
     mask = masks[0]
@@ -324,3 +368,42 @@ def extract_obj_in_box(self, image, mask):
     
     return (obj_expand.unsqueeze(0),)
 
+
+def paint_bbox_tensor(mask, bbox, color=0.0):
+    """
+    将给定的bbox区域在PyTorch张量mask中涂抹为白色。
+    参数:
+    mask: torch.Tensor, 形状为 [1, H, W]，表示单通道mask。
+    bbox: 列表或元组，格式为 [x_min, y_min, x_max, y_max]。
+    return modified_mask: 修改后的mask。
+    """
+    # 提取bbox坐标
+    x_min, y_min, x_max, y_max = bbox
+    
+    # 确保bbox坐标是整数
+    x_min, y_min, x_max, y_max = int(x_min), int(y_min), int(x_max), int(y_max)
+    
+    # 修改mask中对应区域的值为1（白色）
+    mask[:, y_min:y_max, x_min:x_max] = color
+    
+    return mask
+
+def paint_bbox_pil(image, bbox, color = 0):
+    """
+    将给定的bbox区域在PIL图像中涂抹为白色。
+    参数:
+    image: PIL.Image, 输入的图像或mask。
+    bbox: 列表或元组，格式为 [x_min, y_min, x_max, y_max]。
+    返回:
+    modified_image: 修改后的图像。
+    """
+    # 创建一个绘图对象
+    draw = ImageDraw.Draw(image)
+    
+    # 提取bbox坐标
+    x_min, y_min, x_max, y_max = bbox
+    
+    # 绘制白色矩形区域
+    draw.rectangle([x_min, y_min, x_max, y_max], fill=color)
+    
+    return image
