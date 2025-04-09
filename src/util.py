@@ -99,7 +99,7 @@ def expand_face_box(box, width, height, expand_rate = 1.0):
     left, top, right, bottom = int(left), int(top), int(right), int(bottom)
     return (left, top, right, bottom)
 
-def expand_bbox(bbox, image_width, image_height, expand_ratio=0.1):
+def expand_bbox(bbox, image_width, image_height, expand_ratio=0.1, width_more = False):
     """
     扩展bbox的大小，同时确保不超出图像边界。
     
@@ -120,9 +120,14 @@ def expand_bbox(bbox, image_width, image_height, expand_ratio=0.1):
     
     width = x_max - x_min
     height = y_max - y_min
-    
+
     width_expand = width * expand_ratio
     height_expand = height * expand_ratio
+
+    if width_more and (height / width > 1.4):
+        width_expand = width * (expand_ratio  + 0.4)
+        if height / width > 1.6:
+            width_expand = width * (expand_ratio  + 0.7)
     
     new_x_min = max(0, x_min - width_expand / 2)  # 确保不小于0
     new_y_min = max(0, y_min - height_expand / 2)  # 确保不小于0
@@ -407,3 +412,46 @@ def paint_bbox_pil(image, bbox, color = 0):
     draw.rectangle([x_min, y_min, x_max, y_max], fill=color)
     
     return image
+
+
+def pil_resize_with_aspect_ratio(image, max_size):
+    """
+    保持宽高比缩放图像
+    
+    Args:
+        image (PIL.Image): 输入的 PIL 图像对象
+        max_size (int): 期望的最大边长（宽度或高度）
+    
+    Returns:
+        PIL.Image: 缩放后的图像
+    """
+    original_width, original_height = image.size
+    aspect_ratio = original_width / original_height  # 宽高比
+
+    # 计算新尺寸
+    if original_width > original_height:
+        new_width = max_size
+        new_height = int(max_size / aspect_ratio)
+    else:
+        new_height = max_size
+        new_width = int(max_size * aspect_ratio)
+
+    # 使用高质量的抗锯齿滤波器（LANCZOS）
+    resized_image = image.resize((new_width, new_height), Image.LANCZOS)
+    return resized_image
+
+
+# 示例用法
+if __name__ == "__main__":
+    # 加载图像
+    input_image = Image.open("input.jpg")  # 替换为你的图片路径
+    
+    # 设置最大边长（例如 800 像素）
+    max_side_length = 800
+    
+    # 缩放图像
+    output_image = pil_resize_with_aspect_ratio(input_image, max_side_length)
+    
+    # 保存结果
+    output_image.save("output.jpg")
+    print(f"缩放完成！新尺寸: {output_image.size}")

@@ -33,12 +33,12 @@ from src.cloth_segment import ClothesSegment
 class HumanFashionMaskDetailer():
     # use down_long get much more big mask: 
     group_setting = {
-        'upper_short': ['Upper-clothes', ],     # 短衣服1: Upper-clothes  Belt:腰带  Scarf 围巾~
-        'upper_long': ['Upper-clothes', 'Left-arm', 'Right-arm', 'Belt'],        # 短衣服2长袖:  Upper-clothes, Left-arm, Right-arm
+        'upper_short': ['Upper-clothes', 'Scarf', 'Left-arm', 'Right-arm'],     # 短衣服1: Upper-clothes  Belt:腰带  Scarf 围巾~  试试短袖增加手臂~
+        'upper_long': ['Upper-clothes', 'Left-arm', 'Right-arm', 'Belt', 'Scarf'],        # 短衣服2长袖:  Upper-clothes, Left-arm, Right-arm
         'down_short':  ['Pants', 'Belt'],            # Pants,                     # 只有裤子:   
-        'down_long':  ['Pants', 'Left-leg', 'Right-leg', 'Belt', 'Skirt'],              # Pants, Left-leg, Right-leg  
-        'down_longlong': ['Dress', 'Upper-clothes', 'Pants', 'Left-leg', 'Right-leg', 'Skirt', 'Belt'],    # 长裙或者长裤: Pants, Left-leg, Right-leg  , Dress, skit
-        'low_cover_big': ['Skirt', 'Dress', 'Belt',  'Pants',  'Left-leg', 'Right-leg', 'Left-shoe',  'Right-shoe', 'Bag'],
+        'down_long':  ['Pants', 'Left-leg', 'Right-leg', 'Belt', 'Skirt', 'Scarf', 'Left-arm', 'Right-arm'],              # Pants, Left-leg, Right-leg  
+        'down_longlong': ['Dress', 'Upper-clothes', 'Pants', 'Left-leg', 'Right-leg', 'Skirt', 'Belt', 'Scarf', 'Left-arm', 'Right-arm'],    # 长裙或者长裤: Pants, Left-leg, Right-leg  , Dress, skit
+        'low_cover_big': ['Belt',  'Pants',  'Left-leg', 'Right-leg', 'Left-shoe',  'Right-shoe', ],  # 'Dress', 'Skirt', 'Bag'
     }
     def __init__(self):
         self.name = self.__class__.__name__
@@ -80,7 +80,7 @@ class HumanFashionMaskDetailer():
                 if group_ in HumanFashionMaskDetailer.group_setting:
                     for  set_key in HumanFashionMaskDetailer.group_setting[group_]:
                         class_selections[set_key] = True
-                        print(f'>> {group_} : {set_key} seted')
+                        # print(f'>> {group_} : {set_key} seted')
             if len(extra_setting) < 1:
                 class_selections.update(default_class_selections)
             class_map = {
@@ -171,8 +171,8 @@ class FashionSegDetect():
         'upper_short': ['short_sleeved_shirt', 'short_sleeved_outwear', 'vest', 'sling', 'short_sleeved_dress'],     # 短衣服1: Upper-clothes  Belt:腰带  Scarf 围巾~
         'upper_long': ['long_sleeved_shirt', 'long_sleeved_outwear',],        # 短衣服2长袖:  Upper-clothes, Left-arm, Right-arm
         'down_short':  ['shorts', ],            # Pants,                     # 只有裤子:   
-        'down_long':  ['trousers', 'skirt', ],              # Pants, Left-leg, Right-leg  
-        'down_longlong': ['trousers', 'long_sleeved_dress', 'vest_dress', 'sling_dress', 'skirt', 'short_sleeved_dress'],    # 长裙或者长裤: Pants, Left-leg, Right-leg  , Dress, skit
+        'down_long':  ['trousers', ],              # Pants, Left-leg, Right-leg  
+        'down_longlong': ['long_sleeved_dress', 'vest_dress', 'sling_dress', 'skirt', 'short_sleeved_dress'],    # 长裙或者长裤: Pants, Left-leg, Right-leg  , Dress, skit
     }
     class_group_dc = {sub_v: k for k, v in group_cls.items() for sub_v in v}
 

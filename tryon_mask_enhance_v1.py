@@ -113,26 +113,35 @@ human_mask_detect_and_expand_with_setting = HumanMaskSegDetTool.human_mask_detec
 #     pass
 
 DEBUG = True
-lego_version = 'tryon_fashion_mask_enhance_v5.4'
+lego_version = 'tryon_fashion_mask_enhance_v5.5'
 base_dir = '/home/dell/study/test_comfy/img/'
 record_log = f'{base_dir}/1_{lego_version}_1_a600.txt'
 save_dir = f'{base_dir}{lego_version}/'
 
+# /home/dell/study/test_comfy/img/tryon_case_0401
 human_cloth_csv = '/home/dell/study/test_comfy/img/ai换装线上case-0401.csv'
 import pandas as pd
 df = pd.read_csv(human_cloth_csv)
 human_position_dc = {}
 for _, row in df.iterrows():
-    key = f"{int(row['id'])}"
+    if pd.isna(row['id']):
+        continue
+    key = int(row['id'])
     position = row['position']
     human_position_dc[key] = position
+    human_position_dc[key] = position
 
-cloth_ = base_dir + 'tryon_no_mask/cloth_*'
-human_ = base_dir + 'tryon_no_mask/image_*'
+cloth_ = base_dir + 'tryon_case_0401/*_cloth_file*'
+human_ = base_dir + 'tryon_case_0401/*_file_url*'
+mask_ = base_dir + 'tryon_case_0401/*_mask_file*'
+
 clothes = glob.glob(cloth_)
 humans = glob.glob(human_)
-human_dc = {int(i.split('image_')[-1].split('.')[0]): i for i in humans }
-cloth_dc = {int(i.split('cloth_')[-1].split('.')[0]): i for i in clothes }
+masks = glob.glob(mask_)
+human_dc = {int(i.split('/')[-1].split('_file_url')[0]): i for i in humans }
+mask_dc = {int(i.split('/')[-1].split('_mask_file')[0]): i for i in masks }
+cloth_dc = {int(i.split('/')[-1].split('_cloth_file')[0]): i for i in clothes }
+
 
 if 0:
     human_clothe_pairs = [
@@ -141,9 +150,10 @@ if 0:
         for cloth_path in clothes
     ]
 human_clothe_pairs = [
-    {'human_id': human_id,'human_path': human_path,'cloth_path': cloth_dc[human_id],  'position': human_position_dc[human_id]}
+    {'human_id': human_id,'human_path': human_path, "human_mask_path":mask_dc[human_id],
+     'cloth_path': cloth_dc[human_id],  'position': human_position_dc[human_id]}
     for human_id, human_path in human_dc.items()
-    # if human_id in [2]
+    if human_id in human_position_dc  # [2]
 ]
 
 # mask_pil_im_ = '/home/dell/study/test_comfy/img/human_mask/mask_06.png'
@@ -153,11 +163,12 @@ print('>>>>>>>>_humans_cunt:', len(human_clothe_pairs))
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
-
+font_path = '/home/dell/study/test_comfy/wqy-microhei.ttc'
 def main():
     import_custom_nodes()
 
     imageresizekj = NODE_CLASS_MAPPINGS["ImageResizeKJ"]()
+    resizemask = NODE_CLASS_MAPPINGS["ResizeMask"]()
     growmask = NODE_CLASS_MAPPINGS["GrowMask"]()
     growmaskwithblur = NODE_CLASS_MAPPINGS["GrowMaskWithBlur"]()
     import folder_paths
@@ -166,10 +177,13 @@ def main():
     fashion_detect_model =  FashionSegDetect(fashion_cls_model)
     tryon_processor = ReplaceClothesWithReference()   # faild load some nodes
     
+    # convert_masks_to_images = NODE_CLASS_MAPPINGS["Convert Masks to Images"]()
+
     # start Batch----------
     print('>>>>>>>>>>>>>>> statr geternate')
     start_time = time.time()
 
+    # with tqdm.tqdm(len(human_clothe_pairs)) as bar:
     for inx, human_cloth in enumerate(human_clothe_pairs):
 
         start_time = time.time()
@@ -187,23 +201,24 @@ def main():
         ORIG_BBOX_NORMAL = [0, 0, 1.0, 1.0]
         human_img_crop_enhanced = human_img
         
+        position = None if 'position' not in human_cloth else human_cloth['position']
+
+        loadimagemask_init_432 = None
         if 'human_mask_path' not in human_cloth:
             mask_img = None
-            loadimagemask_432 = None
             # get human segment mask , better get the down_parts mask
             # human_mask_optimazed = human_mask_detect_and_expand(loadimage_229_human_img[0], human_fashion_mask_model) # [1,2048,1536]
-            # loadimagemask_432 = human_mask_optimazed
         else:
             # test load a musk see what`s  shape 
             mask_img = Image.open(human_cloth['human_mask_path'])
-            loadimagemask_432 = (pilmask2tensor(mask_img),)       #  shape be like  1,2560, 1920
+            loadimagemask_init_432 = (pilmask2tensor(mask_img),)       #  shape be like  1,2560, 1920
 
         cloth_img = Image.open(human_cloth['cloth_path']).convert('RGB')
         loadimage_228_cloth = (pil2tensor(cloth_img), )
 
         imageresizekj_398 = imageresizekj.resize( # huaman 等效1K缩放~ 
-            width=1024,
-            height=1024,
+            width=1536,
+            height=1536,
             upscale_method="nearest-exact",
             keep_proportion=True,
             divisible_by=2,
@@ -222,26 +237,46 @@ def main():
             box_mask_mask = box_mask['mask']
             bbox_normal = box_mask['bbox_n']
             # bx = box_mask['bbox_xy']
-            # bx_width, bx_height = bx[2] - bx[0], bx[3] - bx[1]
-            # wh_rate = bx_height / bx_width
-            # if wh_rate > 1.4:
-            #     print('is expand ok?')
+            # bx_width, bx_height = bx[2] - bx[0], bx[3] - bx[1]; wh_rate = bx_height / bx_width
+            # if wh_rate > 1.4:      print('is expand ok?')
             bbox_normal_expand, bbox_expand  = expand_bbox(bbox=bbox_normal, image_width=W, image_height=H, expand_ratio=0.6, width_more=True)
             ORIG_BBOX_NORMAL = bbox_normal_expand
             ORIG_BBOX = [int(x_) for x_ in bbox_expand]
             human_img_crop_enhanced = human_img.crop(ORIG_BBOX)
             loadimage_229_human_img_crop_enhanced = (pil2tensor(human_img_crop_enhanced), )
             imageresizekj_398 = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
-                width=1024,
-                height=1024,
+                width=1536,
+                height=1356,
                 upscale_method="nearest-exact",
                 keep_proportion=True,
-                divisible_by=2,
+                divisible_by=32,
                 crop="disabled",
                 image=get_value_at_index(loadimage_229_human_img_crop_enhanced, 0),  # human_image
             )
+            # -- human_rembg for better masking ---- 
+            with torch.inference_mode():
+                human_image_rmbg_398 = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
+                    detail_method="VITMatte",
+                    detail_erode=4,
+                    detail_dilate=2,
+                    black_point=0.01,
+                    white_point=0.99,
+                    max_megapixels=2,
+                    process_detail=False,
+                    device="cuda",
+                    birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
+                    image=get_value_at_index(imageresizekj_398, 0),
+                )
+            human_image_rmbg_398 = (
+                tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
+                    fill_background=True,
+                    background_color="#FFFFFF",
+                    RGBA_image=get_value_at_index(human_image_rmbg_398, 0),
+                )
+            )
+            
             new_rate = (bbox_expand[3] - bbox_expand[1]) / (bbox_expand[2] - bbox_expand[0])
-            if DEBUG:
+            if 0:
                 debug_img = body_res['debug_image']
                 bbox_ = box_mask['bbox_xy']
                 draw = ImageDraw.Draw(debug_img)
@@ -273,22 +308,27 @@ def main():
         )
         fashion_det_res = fashion_detect_model(tensor2pil(clothe_resize1k[0]))  # get fashion type
         
-        human_mask_result2 = human_fashion_mask_model(imageresizekj_398[0], extra_setting=fashion_det_res[1])
+        extra_setting = {} if position == 'whole' else fashion_det_res[1]
+        human_mask_result2 = human_fashion_mask_model(human_image_rmbg_398[0], extra_setting=extra_setting)
         loadimagemask_432 = (human_mask_result2[1], )
         mask_img_pil_enhanced = tensor2pil(loadimagemask_432[0])   # for debug
         
-        human_fashion_type = fashion_detect_model(tensor2pil(human_imageresizekj_by32[0]))  # get human`s fashion type
-        print('>>  human_fashion_type:', human_fashion_type,  'fashion_type: ', fashion_det_res)
+        human_fashion_type = fashion_detect_model(tensor2pil(human_image_rmbg_398[0]))  # get human`s fashion type
+        description = [
+            'human:', ' '.join(human_fashion_type[2]),  'fashion: ', ' '.join(fashion_det_res[2]), 'position:', position
+        ]
+        description = ' '.join(description)
+        print('>> tryon_type_', description)
 
         #  Max low_cover_mask: test in v2 seemed bad
         box_mask = None
         for fashion_type_ in fashion_det_res[1]:
-            if 'down_' in fashion_type_:   #  down_short  down_long  down_longlong
-                human_mask_result2_big_low_part = human_fashion_mask_model(imageresizekj_398[0], extra_setting={'low_cover_big'})
+            if 'down_' in fashion_type_ and position in ['pants', 'whole']:   #  down_short  down_long  down_longlong
+                human_mask_result2_big_low_part = human_fashion_mask_model(human_image_rmbg_398[0], extra_setting={'low_cover_big'})
                 mask_img_pil = tensor2pil(human_mask_result2_big_low_part[1])  #  mode=L size=1242x204
                 box_mask = mask_img_pil.getbbox()
                 break
-        if box_mask:
+        if box_mask:  # position == 'pants' and cloth is pantas or dress
             box_width = box_mask[2] - box_mask[0]
             box_height = box_mask[3] - box_mask[1]            
             human_mask_growed3 = human_mask_result2_big_low_part[1]
@@ -328,7 +368,18 @@ def main():
                 new_tensor_im = tensor2pil(new_human_mask_tensor)
                 face_new_mask_im = new_tensor_im
 
-            
+        # users uploaded and self defined
+        if loadimagemask_init_432 is not None:
+            _, h_, w_= loadimagemask_432[0].shape
+            loadimagemask_init_432 = resizemask.resize(
+                height=h_, width=w_, keep_proportions=False,
+                upscale_method="nearest-exact", crop="disabled",
+                mask=get_value_at_index(loadimagemask_init_432, 0),
+            )
+            human_mask_add = MaskAdd().add_masks(loadimagemask_init_432[0], loadimagemask_432[0])[0]
+            loadimagemask_432 = (human_mask_add, )    # (torch.Size([1, 2560, 1920]), )
+            mask_img_pil_enhanced = tensor2pil(human_mask_add)
+
         # fashion process: remove head
         if 0:  # remove_fashion head part~ optional
             fashion_face_res = yolo_detect(clothe_resize1k[0], detec_type = 'face', debug=True)
@@ -385,7 +436,6 @@ def main():
 
         endtime = time.time()
         cost_time = f'{endtime - start_time:.2f}'
-        description = list(human_fashion_type[1])[0] + '  ' + list(fashion_det_res[1])[0]
         debug_image_collection = [
             (human_img,'human'), (cloth_rmbg, 'cloth'),
             (res_image_15k, f"cost {cost_time} generated"),
@@ -396,29 +446,41 @@ def main():
             # draw_text(refiner_img, "refiner"),
         ]
         debug_image_collection = [
-            draw_text(pil_resize_with_aspect_ratio(im_, 2048), txt_) 
+            draw_text(pil_resize_with_aspect_ratio(im_, 2048), txt_, font_path=font_path) 
             for im_, txt_ in debug_image_collection
         ]
 
         debug_img = make_image_grid(debug_image_collection, cols=len(debug_image_collection), rows=1).convert('RGB')
-        debug_img.save(f'{save_dir}{human_id}_{inx}_res_{lego_version}.png')
+        debug_img.save(f'{save_dir}{human_id}_{inx}_res_{lego_version}.jpeg')
+        debug_imgs = debug_image_collection[:3]+[debug_image_collection[-1]]
+        make_image_grid(
+            debug_imgs, cols=len(debug_imgs), rows=1
+        ).convert('RGB').save(f'{save_dir}{human_id}_{inx}_res_light_{lego_version}.png')
+        final_res_image.convert('RGB').save(f'{save_dir}final_res_{human_id}_{lego_version}.png')
         # ref.write(f"id:{human_id} _{inx}_ {lego_version} cost: {cost_time} sec\n")
         # bar.update(1)
         # break
-    
-def test_original_compare():
+        
+def test_original():
     import_custom_nodes()
+
     imageresizekj = NODE_CLASS_MAPPINGS["ImageResizeKJ"]()
+    resizemask = NODE_CLASS_MAPPINGS["ResizeMask"]()
     growmask = NODE_CLASS_MAPPINGS["GrowMask"]()
     growmaskwithblur = NODE_CLASS_MAPPINGS["GrowMaskWithBlur"]()
     import folder_paths
     fashion_cls_model = os.path.join(folder_paths.models_dir, "yolo/deepfashion2_yolov8s-seg.pt")
+    human_fashion_mask_model = HumanFashionMaskDetailer()
+    fashion_detect_model =  FashionSegDetect(fashion_cls_model)
     tryon_processor = ReplaceClothesWithReference()   # faild load some nodes
     
+    # convert_masks_to_images = NODE_CLASS_MAPPINGS["Convert Masks to Images"]()
+
     # start Batch----------
     print('>>>>>>>>>>>>>>> statr geternate')
     start_time = time.time()
 
+    # with tqdm.tqdm(len(human_clothe_pairs)) as bar:
     for inx, human_cloth in enumerate(human_clothe_pairs):
 
         start_time = time.time()
@@ -436,84 +498,70 @@ def test_original_compare():
         ORIG_BBOX_NORMAL = [0, 0, 1.0, 1.0]
         human_img_crop_enhanced = human_img
         
+        position = None if 'position' not in human_cloth else human_cloth['position']
+
+        loadimagemask_init_432 = None
         if 'human_mask_path' not in human_cloth:
             mask_img = None
-            loadimagemask_432 = None
             # get human segment mask , better get the down_parts mask
             # human_mask_optimazed = human_mask_detect_and_expand(loadimage_229_human_img[0], human_fashion_mask_model) # [1,2048,1536]
-            # loadimagemask_432 = human_mask_optimazed
         else:
             # test load a musk see what`s  shape 
             mask_img = Image.open(human_cloth['human_mask_path'])
-            loadimagemask_432 = (pilmask2tensor(mask_img),)       #  shape be like  1,2560, 1920
+            loadimagemask_init_432 = (pilmask2tensor(mask_img),)       #  shape be like  1,2560, 1920
 
         cloth_img = Image.open(human_cloth['cloth_path']).convert('RGB')
         loadimage_228_cloth = (pil2tensor(cloth_img), )
 
         # call tryon processor
-        if 1:
-            tryon_setting = {'tops':False, 'bottoms':False, 'whole':False}
-            res_image, result_dc = tryon_processor.forward(
-                human_image = loadimage_229_human_img, cloth_image = loadimage_228_cloth, 
-                human_mask = loadimagemask_432, req_set = tryon_setting
-            )
-        else:  # faster debug~
-            result_dc = {}
-            # res_image = tensor2pil(loadimage_229_human_img_crop_enhanced[0])
-            result_dc['cloth_rmbg'] = cloth_img
-            result_dc['middle_lq'] = res_image
-            result_dc['refiner_res'] = res_image
-            
+        tryon_setting = {'tops':False, 'bottoms':False, 'whole':False}
+        res_image, result_dc = tryon_processor.forward(
+            human_image = loadimage_229_human_img, cloth_image = loadimage_228_cloth, 
+            human_mask = loadimagemask_init_432, req_set = tryon_setting
+        )
+
         # paste to the orig image ---------------- ~~~~~~~
-        # final_res_image = copy.deepcopy(human_img)
-        # final_res_image.paste(res_image, box=ORIG_BBOX)
         final_res_image = res_image
 
-        # for showing ~
-        human_imageresize15k = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
-            width=1536, height=1536, upscale_method="nearest-exact",
-            keep_proportion=True, divisible_by=32, crop="disabled",
-            image=get_value_at_index(loadimage_229_human_img, 0),  # human_image
-        )
-        res_image_15k = tensor2pil(
-            imageresizekj.resize(
-                width=1536, height=1536, upscale_method="nearest-exact",
-                keep_proportion=True, divisible_by=32, crop="disabled",
-                image=pil2tensor(res_image.convert('RGB')),
-            )[0]
-        )
-        human_img = tensor2pil(human_imageresize15k[0])
-        human_mask = tensor2pil(loadimagemask_432[0])
-        mask_img_pil1 = tensor2pil(human_mask_result2[1]) # mask notoptimazed
+        human_img = tensor2pil(loadimage_229_human_img[0])
+        human_mask = tensor2pil(loadimagemask_init_432[0])
         # cloth_rmbg = tensor2pil(layerutility_imageremovealpha_273_cloth_rmbg[0])
         cloth_rmbg = result_dc['cloth_rmbg']
         repaint_area_res = result_dc['middle_lq']
         refiner_img = result_dc['refiner_res']
 
+        last_version = 'tryon_fashion_mask_enhance_v5.5'
+        last_version_res = f'/home/dell/study/test_comfy/img/{last_version}/final_res_{human_id}_{last_version}.png'
+        last_version_res = Image.open(last_version_res)
+
         endtime = time.time()
         cost_time = f'{endtime - start_time:.2f}'
-        description = list(human_fashion_type[1])[0] + '  ' + list(fashion_det_res[1])[0]
         debug_image_collection = [
             (human_img,'human'), (cloth_rmbg, 'cloth'),
-            (res_image_15k, f"cost {cost_time} generated"),
-            (mask_img_pil1, "human_mask no optmiz"),
-            (mask_img_pil_enhanced, description), 
+            (final_res_image, f"cost {cost_time} old_tryon"),
+            (last_version_res, "new_enhance tryon"),
             (human_mask, "human_mask"),
-            (final_res_image, "final_img paste back"),
             # draw_text(refiner_img, "refiner"),
         ]
         debug_image_collection = [
-            draw_text(pil_resize_with_aspect_ratio(im_, 2048), txt_) 
+            draw_text(pil_resize_with_aspect_ratio(im_, 2048), txt_, font_path=font_path) 
             for im_, txt_ in debug_image_collection
         ]
 
         debug_img = make_image_grid(debug_image_collection, cols=len(debug_image_collection), rows=1).convert('RGB')
-        debug_img.save(f'{save_dir}{human_id}_{inx}_res_{lego_version}.png')
+        debug_img.save(f'{save_dir}{human_id}_{inx}_res_{lego_version}.jpeg')
+        # final_res_image.convert('RGB').save(f'{save_dir}final_res_{human_id}_{lego_version}.png')
+        # ref.write(f"id:{human_id} _{inx}_ {lego_version} cost: {cost_time} sec\n")
+        # bar.update(1)
+        # break
+    
 
 if __name__ == '__main__':
     print('>> run main or  refiner?  commnet this line!')
-    if 1:
+    if 0:
         main()
+    elif 1:
+        test_original()
     elif 0:
         # test refiner V1
         import_custom_nodes()
@@ -545,7 +593,7 @@ if __name__ == '__main__':
         )
 
         import folder_paths
-        yolo_models = glob.glob(os.path.join(folder_paths.models_dir, "yolo/*.pt")
+        yolo_models = glob.glob(os.path.join(folder_paths.models_dir, "yolo/*.pt"))
         person_model = YOLO(os.path.join(folder_paths.models_dir, "yolo/person_yolov8m-seg.pt"))
         yolo_infer = UltralyticsInference()
         yolo_viser = UltralyticsVisualization()

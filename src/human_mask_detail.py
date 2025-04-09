@@ -114,7 +114,7 @@ from src.util import (
     tensor2pil, pil2tensor, pilmask2tensor, make_image_grid, draw_text, expand_face_box, #, zdxApplySageAtt, #import_custom_nodes
     MaskSubtraction, MaskAdd
 )
-from src.mask_seg_det import HumanFashionMaskDetailer, HumanSegmentParts, FashionSegDetect
+from src.mask_seg_det import HumanFashionMaskDetailer, HumanSegmentParts, FashionSegDetect, ObjExtractByMask
 
 
 
