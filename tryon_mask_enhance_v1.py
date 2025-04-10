@@ -240,13 +240,68 @@ def main():
             image=get_value_at_index(loadimage_229_human_img, 0),  # human_image
         )
         human_imageresizekj_by32 = imageresizekj.resize( # huaman 等效1K缩放~ 
-            width=1536, height=1536, upscale_method="nearest-exact",
+            width=1024, height=1024, upscale_method="nearest-exact",
             keep_proportion=True, divisible_by=32, crop="disabled",
             image=get_value_at_index(loadimage_229_human_img, 0),  # human_image
         )
 
         # human - extract main person
-        body_res = yolo_detect(human_image_rmbg_398[0], detec_type = 'body', debug=True)
+        # human_img = Image.open('/home/dell/study/test_comfy/img/tryon_case_0401/9085117_file_url.jpeg').convert('RGB')
+        # loadimage_229_human_img = (pil2tensor(human_img), )
+        # human_imageresizekj_by32 = imageresizekj.resize( # huaman 等效1K缩放~ 
+        #     width=1536, height=1536, upscale_method="nearest-exact",
+        #     keep_proportion=True, divisible_by=32, crop="disabled",
+        #     image=get_value_at_index(loadimage_229_human_img, 0),  # human_image
+        # )
+        # human_img = tensor2pil(human_imageresizekj_by32[0])
+        # body_res = yolo_detect(human_imageresizekj_by32[0], detec_type = 'body', debug=True)
+        # box_mask = body_res['person'][0]
+        # bx = box_mask['bbox_xy']
+        # draw = ImageDraw.Draw(human_img)
+        # draw.rectangle(bx, fill=(110, 0, 0), width=10)
+
+        # # detetc hand~
+        # hand_res = yolo_detect(human_imageresizekj_by32[0], detec_type = 'hand', debug=True)
+        # if 'hand' in hand_res:
+        #     hand_res_dc = hand_res['hand'][0]
+        #     hand_bbox_xy = hand_res_dc['bbox_xy']
+        #     draw.rectangle(hand_bbox_xy, fill=(0, 255, 0), width=5)
+        # # detetc foot~
+        # foot_res = yolo_detect(human_imageresizekj_by32[0], detec_type = 'foot', debug=True)
+        # if 'foot' in foot_res:
+        #     foot_res_dc = foot_res['foot'][0]
+        #     foot_bbox_xy = foot_res_dc['bbox_xy']
+        #     draw.rectangle(foot_bbox_xy, fill=(0, 0, 128), width=5)
+
+        # make_image_grid([
+        #     human_img, 
+        #     body_res['person'][0]['mask'],foot_res['debug_image'],  body_res['debug_image']
+        # ], rows=1, cols=4).save('/home/dell/study/test_comfy/tryon_1_person_detect.png')
+        # debug to see all result
+
+        # -- human_rembg for better masking ---- 
+        with torch.inference_mode():
+            human_image_rmbg_398 = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
+                detail_method="VITMatte",
+                detail_erode=4,
+                detail_dilate=2,
+                black_point=0.01,
+                white_point=0.99,
+                max_megapixels=2,
+                process_detail=False,
+                device="cuda",
+                birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
+                image=get_value_at_index(imageresizekj_398, 0),
+            )
+        human_image_rmbg_398 = (
+            tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
+                fill_background=True,
+                background_color="#FFFFFF",
+                RGBA_image=get_value_at_index(human_image_rmbg_398, 0),
+            )
+        )
+        # body_res['debug_image'].save('/home/dell/study/test_comfy/tryon_1_person_detect_no.png')
+        body_res = yolo_detect(human_imageresizekj_by32[0], detec_type = 'body', debug=True)
         if body_res is not None and 'person' in body_res:
             box_mask = body_res['person'][0]
             box_mask_mask = box_mask['mask']
