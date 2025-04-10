@@ -758,7 +758,7 @@ class ViewText:
 def yolo_detect(image, detec_type = 'face', debug=False):
     yolo_infer = UltralyticsInference()
     yolo_viser = UltralyticsVisualization()
-    model_config = {'face': 'face_yolov8n.pt', 'body': 'person_yolov8n-seg.pt', 'hand': 'hand_tolov8n.pt'}
+    model_config = {'face': 'face_yolov8n.pt', 'body': 'person_yolov8n-seg.pt', 'hand': 'hand_yolov8n.pt'}
     if detec_type not in model_config:
         raise f'detect_type is not surppott, current only surpport:{model_config}'
     model_path = model_config[detec_type]

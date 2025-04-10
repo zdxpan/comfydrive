@@ -113,7 +113,7 @@ human_mask_detect_and_expand_with_setting = HumanMaskSegDetTool.human_mask_detec
 #     pass
 
 DEBUG = True
-lego_version = 'tryon_fashion_mask_enhance_v5.5'
+lego_version = 'tryon_fashion_mask_enhance_v6.0'
 base_dir = '/home/dell/study/test_comfy/img/'
 record_log = f'{base_dir}/1_{lego_version}_1_a600.txt'
 save_dir = f'{base_dir}{lego_version}/'
@@ -143,6 +143,16 @@ mask_dc = {int(i.split('/')[-1].split('_mask_file')[0]): i for i in masks }
 cloth_dc = {int(i.split('/')[-1].split('_cloth_file')[0]): i for i in clothes }
 
 
+# 1、 no recongnize, maybe seg humanand rembg then willbe better
+MASK_nocover = [9085117, 9083076, 9083313, 9083447, 9085093, 9084804, 9084886, 9083303, 9084642, 9084804,
+                9084886, 9085311, 9085940, 9086053, 9086262, 9086449, 9086607]  
+MASK_resize_error = [9083772, 9085574, 9085581, 9086482]
+MASK_other_area = [9083447, 9084642]
+MASK_expandbad = [9084689, 9084689]
+MASK_should_human_segment = [9085905, 9086097, 9084197, 9084721, 9086512, 9084721]  # add shoulder  2:exclude hand ,foot
+BAD_CASE = MASK_nocover + MASK_resize_error + MASK_other_area  + MASK_expandbad + MASK_should_human_segment
+# alread remove  /home/dell/study/test_comfy/img/hard_case_0401
+
 if 0:
     human_clothe_pairs = [
         {'human_id': human_id,  'human_path': human_path, 'cloth_path': cloth_path}
@@ -153,9 +163,13 @@ human_clothe_pairs = [
     {'human_id': human_id,'human_path': human_path, "human_mask_path":mask_dc[human_id],
      'cloth_path': cloth_dc[human_id],  'position': human_position_dc[human_id]}
     for human_id, human_path in human_dc.items()
-    if human_id in human_position_dc  # [2]
+    if human_id in human_position_dc  and human_id in BAD_CASE
 ]
-
+# import shutil
+# for it in human_clothe_pairs:
+#     src = it['human_path'].split('_file_url')[0] + '*'
+#     for it_sub in  glob.glob(src):
+#         shutil.copy(it_sub, '/home/dell/study/test_comfy/img/hard_case_0401/')
 # mask_pil_im_ = '/home/dell/study/test_comfy/img/human_mask/mask_06.png'
 
 print('>>>>>>>>_humans_cunt:', len(human_clothe_pairs))
@@ -226,12 +240,33 @@ def main():
             image=get_value_at_index(loadimage_229_human_img, 0),  # human_image
         )
         human_imageresizekj_by32 = imageresizekj.resize( # huaman 等效1K缩放~ 
-            width=1024, height=1024, upscale_method="nearest-exact",
+            width=1536, height=1536, upscale_method="nearest-exact",
             keep_proportion=True, divisible_by=32, crop="disabled",
             image=get_value_at_index(loadimage_229_human_img, 0),  # human_image
         )
-        # human - extract main persion
-        body_res = yolo_detect(human_imageresizekj_by32[0], detec_type = 'body', debug=True)
+        # -- human_rembg for better person detect and masking ---- 
+        with torch.inference_mode():
+            human_image_rmbg_398 = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
+                detail_method="VITMatte",
+                detail_erode=4,
+                detail_dilate=2,
+                black_point=0.01,
+                white_point=0.99,
+                max_megapixels=2,
+                process_detail=False,
+                device="cuda",
+                birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
+                image=get_value_at_index(human_imageresizekj_by32, 0),
+            )
+        human_image_rmbg_398 = (
+            tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
+                fill_background=True,
+                background_color="#FFFFFF",
+                RGBA_image=get_value_at_index(human_image_rmbg_398, 0),
+            )
+        )
+        # human - extract main person
+        body_res = yolo_detect(human_image_rmbg_398[0], detec_type = 'body', debug=True)
         if body_res is not None and 'person' in body_res:
             box_mask = body_res['person']
             box_mask_mask = box_mask['mask']
@@ -243,37 +278,51 @@ def main():
             ORIG_BBOX_NORMAL = bbox_normal_expand
             ORIG_BBOX = [int(x_) for x_ in bbox_expand]
             human_img_crop_enhanced = human_img.crop(ORIG_BBOX)
-            loadimage_229_human_img_crop_enhanced = (pil2tensor(human_img_crop_enhanced), )
-            imageresizekj_398 = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
+            with torch.inference_mode():
+                human_img_crop_enhanced_rmbg = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
+                    detail_method="VITMatte", detail_erode=4, detail_dilate=2,
+                    black_point=0.01, white_point=0.99, max_megapixels=2, process_detail=False, device="cuda",
+                    birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
+                    image=pil2tensor(human_img_crop_enhanced),
+                )
+            human_img_crop_enhanced_rmbg = (
+                tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
+                    fill_background=True,
+                    background_color="#FFFFFF",
+                    RGBA_image=get_value_at_index(human_img_crop_enhanced_rmbg, 0),
+                )
+            )
+            loadimage_229_human_img_crop_enhanced = (pil2tensor(human_img_crop_enhanced), )  # 输入的图像移除了背景，接下来没法计算了
+            human_image_rmbg_398 = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
                 width=1536,
                 height=1356,
                 upscale_method="nearest-exact",
                 keep_proportion=True,
                 divisible_by=32,
                 crop="disabled",
-                image=get_value_at_index(loadimage_229_human_img_crop_enhanced, 0),  # human_image
+                image=get_value_at_index(human_img_crop_enhanced_rmbg, 0),  # human_image
             )
             # -- human_rembg for better masking ---- 
-            with torch.inference_mode():
-                human_image_rmbg_398 = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
-                    detail_method="VITMatte",
-                    detail_erode=4,
-                    detail_dilate=2,
-                    black_point=0.01,
-                    white_point=0.99,
-                    max_megapixels=2,
-                    process_detail=False,
-                    device="cuda",
-                    birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
-                    image=get_value_at_index(imageresizekj_398, 0),
-                )
-            human_image_rmbg_398 = (
-                tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
-                    fill_background=True,
-                    background_color="#FFFFFF",
-                    RGBA_image=get_value_at_index(human_image_rmbg_398, 0),
-                )
-            )
+            # with torch.inference_mode():
+            #     human_image_rmbg_398 = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
+            #         detail_method="VITMatte",
+            #         detail_erode=4,
+            #         detail_dilate=2,
+            #         black_point=0.01,
+            #         white_point=0.99,
+            #         max_megapixels=2,
+            #         process_detail=False,
+            #         device="cuda",
+            #         birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
+            #         image=get_value_at_index(imageresizekj_398, 0),
+            #     )
+            # human_image_rmbg_398 = (
+            #     tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
+            #         fill_background=True,
+            #         background_color="#FFFFFF",
+            #         RGBA_image=get_value_at_index(human_image_rmbg_398, 0),
+            #     )
+            # )
             
             new_rate = (bbox_expand[3] - bbox_expand[1]) / (bbox_expand[2] - bbox_expand[0])
             if 0:
@@ -334,7 +383,7 @@ def main():
             human_mask_growed3 = human_mask_result2_big_low_part[1]
             human_in_pants = 'down_long' in human_fashion_type[1] or 'down_short' in human_fashion_type[1]   # 人穿裤子~
             if human_in_pants and 'down_longlong' in fashion_det_res[1]:     # 要换裙子
-                expantd_pixel = int(box_width / 15)
+                expantd_pixel = int(box_width / 20)  # 有个穿长裤的的小姐姐要穿裙子，就绘bad~  need more big mask
                 human_mask_growed3 = growmask.expand_mask(
                     expand=expantd_pixel, tapered_corners=False, mask=human_mask_result2_big_low_part[1],
                 )
@@ -367,9 +416,30 @@ def main():
             if DEBUG:
                 new_tensor_im = tensor2pil(new_human_mask_tensor)
                 face_new_mask_im = new_tensor_im
+        # hand and foot exclude
+        if 1:
+            hand_res = yolo_detect(human_image_enhace_resize_by32[0], detec_type = 'hand', debug=True)
+            if 'hand' in hand_res:
+                hand_res_dc = hand_res['hand']
+                hand_bbox_n = hand_res_dc['bbox_n']
+                _, h_, w_= loadimagemask_432[0].shape
+                hand_bbox_normal_expand, hand_bbox_expand  = expand_bbox(bbox=hand_bbox_n, image_width=w_, image_height=h_, expand_ratio=0.1)
+                new_human_mask_tensor = copy.deepcopy(loadimagemask_432[0])
+                new_human_mask_tensor = paint_bbox_tensor(new_human_mask_tensor, hand_bbox_expand)
+                loadimagemask_432 = (new_human_mask_tensor, )
 
-        # users uploaded and self defined
+        # users uploaded and self defined mask
+        loadimagemask_init_432_img = tensor2pil(loadimagemask_init_432[0])
+        mask_before_add = tensor2pil(loadimagemask_432[0])
         if loadimagemask_init_432 is not None:
+            # bug, some time it shrink resized, cant directly add!!!
+            _, h_, w_= loadimagemask_init_432[0].shape
+            orig_bbox_normal, orig_box  = expand_bbox(bbox=ORIG_BBOX_NORMAL, image_width=w_, image_height=h_, expand_ratio=0)
+            orig_box = [int(x_) for x_ in orig_box]
+            loadimagemask_init_432_img = tensor2pil(loadimagemask_init_432[0])
+            loadimagemask_init_432_img = loadimagemask_init_432_img.crop(orig_box)
+            loadimagemask_init_432 = (pil2tensor(loadimagemask_init_432_img), )
+
             _, h_, w_= loadimagemask_432[0].shape
             loadimagemask_init_432 = resizemask.resize(
                 height=h_, width=w_, keep_proportions=False,
@@ -409,9 +479,9 @@ def main():
             result_dc['refiner_res'] = res_image
             
 
-        # paste to the orig image ---------------- ~~~~~~~
+        # paste to the orig image ---------------- ~~~~~~~ 有时贴回去 不正确--
         final_res_image = copy.deepcopy(human_img)
-        final_res_image.paste(res_image, box=ORIG_BBOX)
+        final_res_image.paste(res_image, box=ORIG_BBOX)  # TODO , add mask to do it  some time generated res is not right
 
         # for showing ~
         human_imageresize15k = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
@@ -441,6 +511,8 @@ def main():
             (res_image_15k, f"cost {cost_time} generated"),
             (mask_img_pil1, "human_mask no optmiz"),
             (mask_img_pil_enhanced, description), 
+            (mask_before_add, 'mask_before_merge'),
+            (loadimagemask_init_432_img, 'mask_uploaded'),
             (human_mask, "human_mask"),
             (final_res_image, "final_img paste back"),
             # draw_text(refiner_img, "refiner"),
@@ -452,11 +524,11 @@ def main():
 
         debug_img = make_image_grid(debug_image_collection, cols=len(debug_image_collection), rows=1).convert('RGB')
         debug_img.save(f'{save_dir}{human_id}_{inx}_res_{lego_version}.jpeg')
-        debug_imgs = debug_image_collection[:3]+[debug_image_collection[-1]]
-        make_image_grid(
-            debug_imgs, cols=len(debug_imgs), rows=1
-        ).convert('RGB').save(f'{save_dir}{human_id}_{inx}_res_light_{lego_version}.png')
-        final_res_image.convert('RGB').save(f'{save_dir}final_res_{human_id}_{lego_version}.png')
+        # debug_imgs = debug_image_collection[:3]+[debug_image_collection[-1]]
+        # make_image_grid(
+        #     debug_imgs, cols=len(debug_imgs), rows=1
+        # ).convert('RGB').save(f'{save_dir}{human_id}_{inx}_res_light_{lego_version}.png')
+        # final_res_image.convert('RGB').save(f'{save_dir}final_res_{human_id}_{lego_version}.png')
         # ref.write(f"id:{human_id} _{inx}_ {lego_version} cost: {cost_time} sec\n")
         # bar.update(1)
         # break
@@ -554,13 +626,12 @@ def test_original():
         # ref.write(f"id:{human_id} _{inx}_ {lego_version} cost: {cost_time} sec\n")
         # bar.update(1)
         # break
-    
 
 if __name__ == '__main__':
     print('>> run main or  refiner?  commnet this line!')
-    if 0:
+    if 1:
         main()
-    elif 1:
+    elif 0:
         test_original()
     elif 0:
         # test refiner V1
@@ -582,7 +653,7 @@ if __name__ == '__main__':
         human_im_1 = (pil2tensor(human_im), )
         loadimage = NODE_CLASS_MAPPINGS["LoadImage"]()
         loadimage_228_cloth = loadimage.load_image(image="cloth_02.png")
-        imageresizekj_398 = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
+        human_imageresizekj_398 = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
             width=1024,
             height=1024,
             upscale_method="nearest-exact",
