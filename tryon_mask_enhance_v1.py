@@ -244,31 +244,11 @@ def main():
             keep_proportion=True, divisible_by=32, crop="disabled",
             image=get_value_at_index(loadimage_229_human_img, 0),  # human_image
         )
-        # -- human_rembg for better person detect and masking ---- 
-        with torch.inference_mode():
-            human_image_rmbg_398 = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
-                detail_method="VITMatte",
-                detail_erode=4,
-                detail_dilate=2,
-                black_point=0.01,
-                white_point=0.99,
-                max_megapixels=2,
-                process_detail=False,
-                device="cuda",
-                birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
-                image=get_value_at_index(human_imageresizekj_by32, 0),
-            )
-        human_image_rmbg_398 = (
-            tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
-                fill_background=True,
-                background_color="#FFFFFF",
-                RGBA_image=get_value_at_index(human_image_rmbg_398, 0),
-            )
-        )
+
         # human - extract main person
         body_res = yolo_detect(human_image_rmbg_398[0], detec_type = 'body', debug=True)
         if body_res is not None and 'person' in body_res:
-            box_mask = body_res['person']
+            box_mask = body_res['person'][0]
             box_mask_mask = box_mask['mask']
             bbox_normal = box_mask['bbox_n']
             # bx = box_mask['bbox_xy']
@@ -293,7 +273,7 @@ def main():
                 )
             )
             loadimage_229_human_img_crop_enhanced = (pil2tensor(human_img_crop_enhanced), )  # 输入的图像移除了背景，接下来没法计算了
-            human_image_rmbg_398 = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
+            imageresizekj_398 = imageresizekj.resize( # huaman 等效1K缩放~ 再处理~
                 width=1536,
                 height=1356,
                 upscale_method="nearest-exact",
@@ -303,26 +283,26 @@ def main():
                 image=get_value_at_index(human_img_crop_enhanced_rmbg, 0),  # human_image
             )
             # -- human_rembg for better masking ---- 
-            # with torch.inference_mode():
-            #     human_image_rmbg_398 = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
-            #         detail_method="VITMatte",
-            #         detail_erode=4,
-            #         detail_dilate=2,
-            #         black_point=0.01,
-            #         white_point=0.99,
-            #         max_megapixels=2,
-            #         process_detail=False,
-            #         device="cuda",
-            #         birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
-            #         image=get_value_at_index(imageresizekj_398, 0),
-            #     )
-            # human_image_rmbg_398 = (
-            #     tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
-            #         fill_background=True,
-            #         background_color="#FFFFFF",
-            #         RGBA_image=get_value_at_index(human_image_rmbg_398, 0),
-            #     )
-            # )
+            with torch.inference_mode():
+                human_image_rmbg_398 = tryon_processor.layermask_birefnetultrav2.birefnet_ultra_v2(
+                    detail_method="VITMatte",
+                    detail_erode=4,
+                    detail_dilate=2,
+                    black_point=0.01,
+                    white_point=0.99,
+                    max_megapixels=2,
+                    process_detail=False,
+                    device="cuda",
+                    birefnet_model=get_value_at_index(tryon_processor.layermask_loadbirefnetmodelv2_272, 0),
+                    image=get_value_at_index(imageresizekj_398, 0),
+                )
+            human_image_rmbg_398 = (
+                tryon_processor.layerutility_imageremovealpha.image_remove_alpha(
+                    fill_background=True,
+                    background_color="#FFFFFF",
+                    RGBA_image=get_value_at_index(human_image_rmbg_398, 0),
+                )
+            )
             
             new_rate = (bbox_expand[3] - bbox_expand[1]) / (bbox_expand[2] - bbox_expand[0])
             if 0:
@@ -404,7 +384,7 @@ def main():
         face_res = yolo_detect(human_image_enhace_resize_by32[0], detec_type = 'face', debug=True)
         face_new_mask_im = None # for debug
         if 'face' in face_res:
-            face_res_dc = face_res['face']
+            face_res_dc = face_res['face'][0]
             face_bbox_n = face_res_dc['bbox_n']
             face_bbox = face_res_dc['bbox_xy']
             _, h_, w_= loadimagemask_432[0].shape
@@ -420,13 +400,26 @@ def main():
         if 1:
             hand_res = yolo_detect(human_image_enhace_resize_by32[0], detec_type = 'hand', debug=True)
             if 'hand' in hand_res:
-                hand_res_dc = hand_res['hand']
+                hand_res_dc = hand_res['hand'][0]
                 hand_bbox_n = hand_res_dc['bbox_n']
                 _, h_, w_= loadimagemask_432[0].shape
                 hand_bbox_normal_expand, hand_bbox_expand  = expand_bbox(bbox=hand_bbox_n, image_width=w_, image_height=h_, expand_ratio=0.1)
                 new_human_mask_tensor = copy.deepcopy(loadimagemask_432[0])
                 new_human_mask_tensor = paint_bbox_tensor(new_human_mask_tensor, hand_bbox_expand)
                 loadimagemask_432 = (new_human_mask_tensor, )
+
+            # detetc foot~
+            foot_res = yolo_detect(human_imageresizekj_by32[0], detec_type = 'foot', debug=True)
+            if 'foot' in foot_res:
+                foot_res_dc = foot_res['foot'][0]
+                # foot_bbox_xy = foot_res_dc['bbox_xy']
+                foot_bbox_n = foot_res_dc['bbox_n']
+                _, h_, w_= loadimagemask_432[0].shape
+                foot_bbox_normal_expand, foot_bbox_expand  = expand_bbox(bbox=foot_bbox_n, image_width=w_, image_height=h_, expand_ratio=0.1)
+                new_human_mask_tensor = copy.deepcopy(loadimagemask_432[0])
+                new_human_mask_tensor = paint_bbox_tensor(new_human_mask_tensor, foot_bbox_expand)
+                loadimagemask_432 = (new_human_mask_tensor, )
+
 
         # users uploaded and self defined mask
         loadimagemask_init_432_img = tensor2pil(loadimagemask_init_432[0])
@@ -450,11 +443,12 @@ def main():
             loadimagemask_432 = (human_mask_add, )    # (torch.Size([1, 2560, 1920]), )
             mask_img_pil_enhanced = tensor2pil(human_mask_add)
 
+
         # fashion process: remove head
         if 0:  # remove_fashion head part~ optional
             fashion_face_res = yolo_detect(clothe_resize1k[0], detec_type = 'face', debug=True)
             if 'face' in fashion_face_res:
-                fashion_face_res_dc = fashion_face_res['face']
+                fashion_face_res_dc = fashion_face_res['face'][0]
                 face_bbox_n = fashion_face_res_dc['bbox_n']
                 face_bbox = fashion_face_res_dc['bbox_xy']
                 _, h_, w_, _= loadimage_228_cloth[0].shape

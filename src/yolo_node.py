@@ -82,7 +82,11 @@ def get_yolo_result(results):
             _ = cv2.drawContours(b_mask, [contour], -1, (255, 255, 255), cv2.FILLED)
             b_mask_pil = Image.fromarray(b_mask)
         # b_mask_pil.save('/home/dell/study/test_comfy/img/yolo_person_mask.png')
-        res[label] =  {'mask': b_mask_pil, 'bbox': bbox, 'bbox_n': bbox_n, 'bbox_xy': bbox_xy}
+        item = {'mask': b_mask_pil, 'bbox': bbox, 'bbox_n': bbox_n, 'bbox_xy': bbox_xy}
+        if label not in res:
+            res[label] =  [item]
+        else:
+            res[label].append(item)
     return res
 
 
@@ -754,11 +758,17 @@ class ViewText:
         # Parse the combined JSON string
         return {"ui": {"text": text}, "result": (text,)}
 
+def sort_res_by_bbox(res):
+    for k in res:
+        res[k] = sorted(res[k], key=lambda x: (x['bbox'][2] * x['bbox'][3]), reverse=True)
+    return res
+
 
 def yolo_detect(image, detec_type = 'face', debug=False):
     yolo_infer = UltralyticsInference()
     yolo_viser = UltralyticsVisualization()
-    model_config = {'face': 'face_yolov8n.pt', 'body': 'person_yolov8n-seg.pt', 'hand': 'hand_yolov8n.pt'}
+    model_config = {'face': 'face_yolov8n.pt', 'body': 'person_yolov8n-seg.pt', 
+                    'hand': 'hand_yolov8n.pt', 'foot': 'foot-yolov8l.pt'}
     if detec_type not in model_config:
         raise f'detect_type is not surppott, current only surpport:{model_config}'
     model_path = model_config[detec_type]
@@ -770,11 +780,12 @@ def yolo_detect(image, detec_type = 'face', debug=False):
     yolo_model = YOLO(model_name)
     yres = yolo_infer.inference(model=yolo_model, image=image, classes="None")
     res = get_yolo_result(yres[0])   # get label -> [mask, bbox]
+    res = sort_res_by_bbox(res)
     if debug:
         yolo_vis1 = tensor2pil(
             yolo_viser.visualize(image, yres[0])[0]
         )
-        # yolo_vis1.save(f'/home/dell/study/test_comfy/img/yolo_{name}.jpeg')
+        # yolo_vis1.save(f'/home/dell/study/test_comfy/tryon_1_person_detect_debug.png')
         res['debug_image'] = yolo_vis1
     return res
 
